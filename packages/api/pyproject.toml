@@ -1,0 +1,20 @@
+[project]
+name = "spheraform-api"
+version = "0.1.0"
+description = "FastAPI backend for geodata aggregator"
+requires-python = ">=3.11"
+
+dependencies = [
+    "spheraform-core",
+    "fastapi>=0.109",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.6",  # For file uploads
+    "redis>=5.0",
+    "celery>=5.3",  # For background jobs
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

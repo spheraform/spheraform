@@ -1,0 +1,14 @@
+[project]
+name = "spheraform-client"
+version = "0.1.0"
+description = "Python client library for geodata aggregator API"
+requires-python = ">=3.11"
+
+dependencies = [
+    "httpx>=0.25",
+    "pydantic>=2.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

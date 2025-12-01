@@ -1,0 +1,20 @@
+[project]
+name = "spheraform-cli"
+version = "0.1.0"
+description = "Command-line interface for spheraform aggregator"
+requires-python = ">=3.11"
+
+dependencies = [
+    "spheraform-core",
+    "spheraform-client",
+    "typer>=0.9",
+    "rich>=13.7",  # For beautiful CLI output
+    "click>=8.1",  # Typer dependency
+]
+
+[project.scripts]
+spheraform = "spheraform_cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

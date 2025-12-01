@@ -1,0 +1,37 @@
+[project]
+name = "spheraform-core"
+version = "0.1.0"
+description = "Core library for geodata aggregator (models, adapters, business logic)"
+requires-python = ">=3.11"
+
+dependencies = [
+    # Database
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+    "alembic>=1.12",
+    "geoalchemy2>=0.14",
+
+    # Geospatial
+    "shapely>=2.0",
+    "pyproj>=3.6",
+    "fiona>=1.9",
+
+    # HTTP clients
+    "httpx>=0.25",
+    "aiohttp>=3.9",
+
+    # Data processing
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+
+    # Utilities
+    "python-dateutil>=2.8",
+    "tenacity>=8.2",  # Retry logic
+
+    # Cryptography (for credential encryption)
+    "cryptography>=41.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,16 @@
+[project]
+name = "spheraform-pipelines"
+version = "0.1.0"
+description = "Dagster pipelines for geodata aggregator (crawl, probe, sync)"
+requires-python = ">=3.11"
+
+dependencies = [
+    "spheraform-core",
+    "dagster>=1.6",
+    "dagster-webserver>=1.6",
+    "dagster-postgres>=0.22",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
