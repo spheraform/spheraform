@@ -59,7 +59,7 @@ class ChangeCheck(Base, UUIDMixin):
 
     # What method was used
     method: Mapped[ChangeCheckMethod] = mapped_column(
-        SQLEnum(ChangeCheckMethod, name="change_check_method"),
+        SQLEnum(ChangeCheckMethod, name="change_check_method", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
 

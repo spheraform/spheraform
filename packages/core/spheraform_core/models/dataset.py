@@ -12,12 +12,12 @@ from sqlalchemy import (
     Enum as SQLEnum,
     Index,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from geoalchemy2 import Geometry
 import enum
 
-from .base import Base, TimestampMixin, UUIDMixin
+from .base import Base, TimestampMixin, UUIDMixin, ArrayOfText
 
 
 class DownloadStrategy(str, enum.Enum):
@@ -52,9 +52,9 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Search and classification
-    keywords: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    keywords: Mapped[Optional[list[str]]] = mapped_column(ArrayOfText(), nullable=True)
     themes: Mapped[Optional[list[str]]] = mapped_column(
-        ARRAY(Text), nullable=True, index=True
+        ArrayOfText(), nullable=True, index=True
     )
     # Themes: hydro, transport, admin, boundaries, elevation, imagery, etc.
 
@@ -68,7 +68,7 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
     feature_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     updated_date: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     download_formats: Mapped[Optional[list[str]]] = mapped_column(
-        ARRAY(Text), nullable=True
+        ArrayOfText(), nullable=True
     )
     access_url: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -89,7 +89,7 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
 
     # Download Strategy
     download_strategy: Mapped[DownloadStrategy] = mapped_column(
-        SQLEnum(DownloadStrategy, name="download_strategy"),
+        SQLEnum(DownloadStrategy, name="download_strategy", values_callable=lambda x: [e.value for e in x]),
         default=DownloadStrategy.SIMPLE,
         nullable=False,
     )

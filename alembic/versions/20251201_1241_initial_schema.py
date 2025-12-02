@@ -106,7 +106,7 @@ def upgrade() -> None:
     op.create_index('ix_datasets_geoserver_id', 'datasets', ['geoserver_id'])
     op.create_index('ix_datasets_is_active', 'datasets', ['is_active'])
     op.create_index('ix_datasets_geoserver_active', 'datasets', ['geoserver_id', 'is_active'])
-    op.create_index('ix_datasets_themes_active', 'datasets', ['themes', 'is_active'], postgresql_using='gin')
+    op.create_index('ix_datasets_themes', 'datasets', ['themes'], postgresql_using='gin')
     op.create_index('ix_datasets_bbox', 'datasets', ['bbox'], postgresql_using='gist')
 
     # Create change_checks table
@@ -222,7 +222,7 @@ def downgrade() -> None:
     op.drop_table('change_checks')
 
     op.drop_index('ix_datasets_bbox', table_name='datasets')
-    op.drop_index('ix_datasets_themes_active', table_name='datasets')
+    op.drop_index('ix_datasets_themes', table_name='datasets')
     op.drop_index('ix_datasets_geoserver_active', table_name='datasets')
     op.drop_index('ix_datasets_is_active', table_name='datasets')
     op.drop_index('ix_datasets_geoserver_id', table_name='datasets')

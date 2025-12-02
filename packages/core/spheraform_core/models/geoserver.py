@@ -3,11 +3,10 @@
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import String, Text, Integer, Enum as SQLEnum
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 import enum
 
-from .base import Base, TimestampMixin, UUIDMixin
+from .base import Base, TimestampMixin, UUIDMixin, JSONType
 
 
 class ProviderType(str, enum.Enum):
@@ -47,15 +46,15 @@ class Geoserver(Base, UUIDMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     provider_type: Mapped[ProviderType] = mapped_column(
-        SQLEnum(ProviderType, name="provider_type"),
+        SQLEnum(ProviderType, name="provider_type", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
 
     # Authentication (encrypted credentials stored as JSON)
-    auth_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    auth_config: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
 
     # Server capabilities (discovered during probe)
-    capabilities: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    capabilities: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
     # Example capabilities structure:
     # {
     #   "max_features_per_request": 1000,
@@ -69,7 +68,7 @@ class Geoserver(Base, UUIDMixin, TimestampMixin):
 
     # Health and status
     health_status: Mapped[HealthStatus] = mapped_column(
-        SQLEnum(HealthStatus, name="health_status"),
+        SQLEnum(HealthStatus, name="health_status", values_callable=lambda x: [e.value for e in x]),
         default=HealthStatus.UNKNOWN,
         nullable=False,
     )
@@ -81,7 +80,7 @@ class Geoserver(Base, UUIDMixin, TimestampMixin):
         default=24,
         nullable=False,
     )
-    rate_limit_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    rate_limit_config: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
     # Example rate_limit_config:
     # {
     #   "requests_per_second": 5,
@@ -90,7 +89,7 @@ class Geoserver(Base, UUIDMixin, TimestampMixin):
     # }
 
     # Connection configuration
-    connection_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    connection_config: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
     # Example connection_config:
     # {
     #   "timeout": 60,

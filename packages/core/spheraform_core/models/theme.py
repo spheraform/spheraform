@@ -2,10 +2,9 @@
 
 from typing import Optional
 from sqlalchemy import String, Text, ForeignKey
-from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
+from .base import Base, ArrayOfText
 
 
 class Theme(Base):
@@ -27,7 +26,7 @@ class Theme(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Keywords for auto-classification
-    aliases: Mapped[Optional[list[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    aliases: Mapped[Optional[list[str]]] = mapped_column(ArrayOfText(), nullable=True)
     # Example: hydro theme has aliases ["water", "stream", "river", "watershed"]
 
     # Hierarchical structure

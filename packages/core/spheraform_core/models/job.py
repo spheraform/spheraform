@@ -10,13 +10,14 @@ from sqlalchemy import (
     ForeignKey,
     Enum as SQLEnum,
     Index,
+    JSON,
 )
-from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from geoalchemy2 import Geometry
 import enum
 
-from .base import Base, TimestampMixin, UUIDMixin
+from .base import Base, TimestampMixin, UUIDMixin, JSONType, ArrayOfUUID
 
 
 class JobStatus(str, enum.Enum):
@@ -63,7 +64,7 @@ class DownloadJob(Base, UUIDMixin, TimestampMixin):
 
     # Job status
     status: Mapped[JobStatus] = mapped_column(
-        SQLEnum(JobStatus, name="job_status"),
+        SQLEnum(JobStatus, name="job_status", values_callable=lambda x: [e.value for e in x]),
         default=JobStatus.PENDING,
         nullable=False,
         index=True,
@@ -91,7 +92,7 @@ class DownloadJob(Base, UUIDMixin, TimestampMixin):
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Additional parameters
-    params: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    params: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
     # Example params: {"clip_geometry": {...}, "crs": "EPSG:4326"}
 
     def __repr__(self) -> str:
@@ -124,7 +125,7 @@ class DownloadChunk(Base, UUIDMixin):
     )  # oid_range, offset, spatial_grid
 
     # Parameters for fetching this chunk
-    params: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    params: Mapped[dict] = mapped_column(JSONType, nullable=False)
     # Example params by strategy:
     # oid_range: {"min_oid": 0, "max_oid": 1000}
     # offset: {"offset": 5000, "limit": 1000}
@@ -132,7 +133,7 @@ class DownloadChunk(Base, UUIDMixin):
 
     # Status
     status: Mapped[JobStatus] = mapped_column(
-        SQLEnum(JobStatus, name="job_status"),
+        SQLEnum(JobStatus, name="job_status", values_callable=lambda x: [e.value for e in x]),
         default=JobStatus.PENDING,
         nullable=False,
     )
@@ -171,12 +172,12 @@ class ExportJob(Base, UUIDMixin, TimestampMixin):
 
     # Datasets to export
     dataset_ids: Mapped[list[uuid.UUID]] = mapped_column(
-        ARRAY(UUID(as_uuid=True)), nullable=False
+        ArrayOfUUID(), nullable=False
     )
 
     # Export format
     format: Mapped[ExportFormat] = mapped_column(
-        SQLEnum(ExportFormat, name="export_format"),
+        SQLEnum(ExportFormat, name="export_format", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
 
@@ -188,7 +189,7 @@ class ExportJob(Base, UUIDMixin, TimestampMixin):
 
     # Job status
     status: Mapped[JobStatus] = mapped_column(
-        SQLEnum(JobStatus, name="job_status"),
+        SQLEnum(JobStatus, name="job_status", values_callable=lambda x: [e.value for e in x]),
         default=JobStatus.PENDING,
         nullable=False,
         index=True,
@@ -209,7 +210,7 @@ class ExportJob(Base, UUIDMixin, TimestampMixin):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Format-specific parameters
-    params: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    params: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
     # Example for PostGIS: {"connection_string": "...", "schema": "imported"}
     # Example for MBTiles: {"min_zoom": 0, "max_zoom": 14, "bounds": [...]}
 

@@ -23,7 +23,7 @@ target_metadata = Base.metadata
 # Get database URL from environment variable
 config.set_main_option(
     "sqlalchemy.url",
-    os.getenv("DATABASE_URL", "postgresql+psycopg://spheraform:spheraform_dev@localhost:15432/spheraform")
+    os.getenv("DATABASE_URL", "postgresql+psycopg://spheraform:spheraform_dev@localhost:5432/spheraform")
 )
 
 
