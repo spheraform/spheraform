@@ -106,6 +106,9 @@ class Geoserver(Base, UUIDMixin, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     contact_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     organization: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, comment="ISO 3166-1 alpha-2 country code(s), comma-separated (e.g. GB or BE,NL,LU)"
+    )
 
     def __repr__(self) -> str:
         return f"<Geoserver(name='{self.name}', type='{self.provider_type}', status='{self.health_status}')>"

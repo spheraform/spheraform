@@ -1,7 +1,6 @@
 from logging.config import fileConfig
 import os
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool, text
 from alembic import context
 
 # this is the Alembic Config object, which provides
@@ -75,7 +74,7 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             # Ensure PostGIS extension is enabled
-            connection.execute("CREATE EXTENSION IF NOT EXISTS postgis")
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
             context.run_migrations()
 
 

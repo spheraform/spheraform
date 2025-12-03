@@ -2,12 +2,14 @@
 
 from typing import List
 from uuid import UUID
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db
 from ..schemas import ServerCreate, ServerUpdate, ServerResponse
-from spheraform_core.models import Geoserver, HealthStatus
+from spheraform_core.models import Geoserver, HealthStatus, Dataset, ProviderType
+from spheraform_core.adapters import ArcGISAdapter
 
 router = APIRouter()
 
@@ -30,6 +32,7 @@ async def create_server(server: ServerCreate, db: Session = Depends(get_db)):
         description=server.description,
         contact_email=server.contact_email,
         organization=server.organization,
+        country=server.country,
         health_status=HealthStatus.UNKNOWN,
         dataset_count=0,
         active_dataset_count=0,
@@ -104,7 +107,7 @@ async def delete_server(server_id: UUID, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.post("/{server_id}/crawl", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{server_id}/crawl")
 async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
     """
     Trigger a discovery/crawl job for this server.
@@ -118,8 +121,92 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
             detail=f"Server {server_id} not found",
         )
 
-    # TODO: Trigger crawl job (will implement with Dagster/Celery)
-    return {"message": "Crawl job queued", "server_id": server_id}
+    # Only ArcGIS is currently supported
+    if server.provider_type != ProviderType.ARCGIS:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=f"Crawling not yet implemented for {server.provider_type}",
+        )
+
+    start_time = datetime.utcnow()
+    datasets_new = 0
+    datasets_updated = 0
+
+    try:
+        # Create adapter with connection config and proxy support
+        # Use server's country field for proxy selection
+        async with ArcGISAdapter(
+            base_url=server.base_url,
+            connection_config=server.connection_config,
+            country_hint=server.country,
+        ) as adapter:
+            # Discover datasets
+            async for dataset_meta in adapter.discover_datasets():
+                # Check if dataset already exists
+                existing = (
+                    db.query(Dataset)
+                    .filter(
+                        Dataset.geoserver_id == server.id,
+                        Dataset.external_id == dataset_meta.external_id,
+                    )
+                    .first()
+                )
+
+                if existing:
+                    # Update existing dataset
+                    existing.name = dataset_meta.name
+                    existing.description = dataset_meta.description
+                    existing.access_url = dataset_meta.access_url
+                    existing.feature_count = dataset_meta.feature_count
+                    existing.bbox = dataset_meta.bbox
+                    existing.themes = dataset_meta.themes
+                    existing.updated_at = datetime.utcnow()
+                    datasets_updated += 1
+                else:
+                    # Create new dataset
+                    new_dataset = Dataset(
+                        geoserver_id=server.id,
+                        external_id=dataset_meta.external_id,
+                        name=dataset_meta.name,
+                        description=dataset_meta.description,
+                        access_url=dataset_meta.access_url,
+                        feature_count=dataset_meta.feature_count,
+                        bbox=dataset_meta.bbox,
+                        themes=dataset_meta.themes or [],
+                        is_active=True,
+                    )
+                    db.add(new_dataset)
+                    datasets_new += 1
+
+            # Update server metadata
+            server.last_crawl = datetime.utcnow()
+            server.dataset_count = db.query(Dataset).filter(Dataset.geoserver_id == server.id).count()
+            server.active_dataset_count = (
+                db.query(Dataset)
+                .filter(Dataset.geoserver_id == server.id, Dataset.is_active == True)
+                .count()
+            )
+            server.health_status = HealthStatus.HEALTHY
+
+            db.commit()
+
+            duration = (datetime.utcnow() - start_time).total_seconds()
+
+            return {
+                "server_id": server_id,
+                "datasets_discovered": datasets_new + datasets_updated,
+                "datasets_new": datasets_new,
+                "datasets_updated": datasets_updated,
+                "crawl_duration_seconds": duration,
+            }
+
+    except Exception as e:
+        server.health_status = HealthStatus.OFFLINE
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Crawl failed: {str(e)}",
+        )
 
 
 @router.get("/{server_id}/health")

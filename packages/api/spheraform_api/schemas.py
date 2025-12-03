@@ -22,6 +22,7 @@ class ServerCreate(BaseModel):
     description: Optional[str] = None
     contact_email: Optional[str] = None
     organization: Optional[str] = None
+    country: Optional[str] = Field(None, description="ISO 3166-1 alpha-2 country code(s), comma-separated (e.g. GB or BE,NL,LU)", max_length=50)
 
 
 class ServerUpdate(BaseModel):
@@ -35,6 +36,7 @@ class ServerUpdate(BaseModel):
     description: Optional[str] = None
     contact_email: Optional[str] = None
     organization: Optional[str] = None
+    country: Optional[str] = Field(None, max_length=50)
 
 
 class ServerResponse(BaseModel):
@@ -52,6 +54,7 @@ class ServerResponse(BaseModel):
     description: Optional[str]
     contact_email: Optional[str]
     organization: Optional[str]
+    country: Optional[str]
     created_at: datetime
     updated_at: datetime
 

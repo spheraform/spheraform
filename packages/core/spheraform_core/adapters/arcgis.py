@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, Dict
 import uuid
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -15,6 +15,7 @@ from .base import (
     ChangeCheckResult,
     DownloadResult,
 )
+from ..proxy import proxy_manager
 
 
 class ArcGISAdapter(BaseGeoserverAdapter):
@@ -26,12 +27,55 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
     provider_type = "arcgis"
 
-    def __init__(self, base_url: str, **kwargs):
+    def __init__(
+        self,
+        base_url: str,
+        connection_config: Optional[Dict] = None,
+        country_hint: Optional[str] = None,
+        **kwargs
+    ):
         super().__init__(base_url, **kwargs)
-        self.client = httpx.AsyncClient(
-            timeout=self.timeout,
-            verify=self.verify_ssl,
+        self.connection_config = connection_config or {}
+        self.country_hint = country_hint
+
+        # Use browser-like headers to avoid WAF blocking
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+        }
+
+        # Get proxy configuration
+        proxy_url = proxy_manager.get_proxy_for_server(
+            self.connection_config, self.country_hint
         )
+
+        # Log proxy usage
+        if proxy_url:
+            print(f"ArcGIS adapter using proxy: {proxy_url} for {base_url}")
+        else:
+            print(f"ArcGIS adapter NOT using proxy for {base_url}")
+
+        # Create HTTP client with optional proxy
+        client_kwargs = {
+            "timeout": self.timeout,
+            "verify": self.verify_ssl,
+            "headers": headers,
+            "follow_redirects": True,
+        }
+
+        if proxy_url:
+            # httpx AsyncClient uses 'proxy' parameter with a URL string
+            client_kwargs["proxy"] = proxy_url
+
+        self.client = httpx.AsyncClient(**client_kwargs)
 
     async def __aenter__(self):
         return self
@@ -44,12 +88,21 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         """Make HTTP request with retry logic."""
         headers = self._build_auth_headers()
         params = params or {}
-        params.setdefault("f", "json")  # Default to JSON format
+        params.setdefault("f", "pjson")  # Use pjson for better compatibility with ArcGIS REST
 
-        response = await self.client.get(url, params=params, headers=headers)
-        response.raise_for_status()
-
-        return response.json()
+        try:
+            response = await self.client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            # Log response details for debugging
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"Request failed for {url}: {e}")
+                print(f"Response status: {e.response.status_code}")
+                print(f"Response body (first 500 chars): {e.response.text[:500]}")
+            else:
+                print(f"Request failed for {url}: {e}")
+            raise
 
     async def probe_capabilities(self) -> ServerCapabilities:
         """
