@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = Field(
-        default="postgresql+psycopg://spheraform:spheraform_dev@localhost:15432/spheraform",
+        default="postgresql+psycopg://spheraform:spheraform_dev@localhost:5432/spheraform",
         description="PostgreSQL connection URL",
     )
 

@@ -171,7 +171,7 @@ async def download_dataset_file(
             connection_config=geoserver.connection_config,
             country_hint=geoserver.country,
         ) as adapter:
-            # Decide download strategy based on feature count
+            # Get feature count for logging
             feature_count = dataset.feature_count or 0
 
             if feature_count == 0:
@@ -184,22 +184,26 @@ async def download_dataset_file(
                 })
                 feature_count = count_result.get("count", 0)
 
-            # Choose download method
-            if feature_count < 5000 and not parallel:
-                # Use simple paged download for small datasets
-                print(f"Using paged download for {feature_count} features")
-                result = await adapter.download_paged(
-                    layer_url=dataset.access_url,
-                    output_path=temp_path,
-                    max_records=1000,
-                )
-            else:
-                # Use parallel download for large datasets
+            # Choose download method - check parallel parameter FIRST
+            if parallel and feature_count >= 5000:
+                # Use parallel download for large datasets when parallel is enabled
                 print(f"Using parallel download for {feature_count} features with {workers} workers")
                 result = await adapter.download_parallel(
                     layer_url=dataset.access_url,
                     output_path=temp_path,
                     num_workers=workers,
+                )
+            else:
+                # Use paged download for all other cases:
+                # - When parallel is explicitly disabled (parallel=false)
+                # - When dataset is small (< 5000 features)
+                # - When feature count is unknown
+                reason = "parallel disabled" if not parallel else f"small dataset ({feature_count} features)"
+                print(f"Using paged download: {reason}")
+                result = await adapter.download_paged(
+                    layer_url=dataset.access_url,
+                    output_path=temp_path,
+                    max_records=1000,
                 )
 
             if not result.success:
