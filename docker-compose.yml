@@ -77,6 +77,32 @@ services:
       - "3000:3000"
     command: --listen-addresses 0.0.0.0:3000
 
+  # Spheraform API
+  api:
+    build:
+      context: ./packages/api
+      dockerfile: Dockerfile
+    container_name: spheraform-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://spheraform:spheraform_dev@postgres:5432/spheraform
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: spheraform
+      PROXYSCRAPE_ENABLED: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./packages/api:/app/api
+      - ./packages/core:/app/core
+    restart: unless-stopped
+
   # TiTiler - Commented out due to no ARM64 support
   # Uncomment if you're on x86_64 architecture
   # titiler:
