@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_db
 from ..schemas import DatasetResponse
-from spheraform_core.models import Dataset
+from spheraform_core.models import Dataset, Geoserver, ProviderType
+from spheraform_core.adapters import ArcGISAdapter
 
 router = APIRouter()
 
@@ -46,7 +47,7 @@ async def get_dataset(dataset_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/{dataset_id}/preview")
-async def preview_dataset(dataset_id: UUID, db: Session = Depends(get_db)):
+async def preview_dataset(dataset_id: UUID, limit: int = 100, db: Session = Depends(get_db)):
     """
     Get a preview of the dataset (sample features as GeoJSON).
 
@@ -59,16 +60,57 @@ async def preview_dataset(dataset_id: UUID, db: Session = Depends(get_db)):
             detail=f"Dataset {dataset_id} not found",
         )
 
-    # TODO: Implement preview fetching using adapter
-    return {
-        "type": "FeatureCollection",
-        "features": [],
-        "properties": {
-            "dataset_id": str(dataset_id),
-            "name": dataset.name,
-            "sample": True,
-        },
-    }
+    # Get the associated geoserver
+    geoserver = db.query(Geoserver).filter(Geoserver.id == dataset.geoserver_id).first()
+    if not geoserver:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geoserver not found for dataset {dataset_id}",
+        )
+
+    # Only ArcGIS is currently supported
+    if geoserver.provider_type != ProviderType.ARCGIS:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=f"Preview not yet implemented for {geoserver.provider_type}",
+        )
+
+    try:
+        # Create adapter with connection config and proxy support
+        async with ArcGISAdapter(
+            base_url=geoserver.base_url,
+            connection_config=geoserver.connection_config,
+            country_hint=geoserver.country,
+        ) as adapter:
+            # Fetch preview using the dataset's access_url
+            geojson = await adapter.get_preview(dataset.access_url, limit=limit)
+
+            if geojson is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to fetch preview from source",
+                )
+
+            # Add metadata to the response
+            if "properties" not in geojson:
+                geojson["properties"] = {}
+
+            geojson["properties"].update({
+                "dataset_id": str(dataset_id),
+                "name": dataset.name,
+                "sample": True,
+                "limit": limit,
+            })
+
+            return geojson
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Preview failed: {str(e)}",
+        )
 
 
 @router.post("/{dataset_id}/refresh", status_code=status.HTTP_202_ACCEPTED)

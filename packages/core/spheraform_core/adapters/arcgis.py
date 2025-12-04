@@ -383,8 +383,9 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
     async def download_paged(
         self,
-        external_id: str,
+        layer_url: str,
         output_path: str,
+        max_records: int = 1000,
         geometry: Optional[dict] = None,
         format: str = "geojson",
     ) -> DownloadResult:
@@ -392,9 +393,129 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         Download dataset using offset-based pagination.
 
         For datasets larger than max_features_per_request.
+
+        Args:
+            layer_url: Full URL to the layer
+            output_path: Path to save the GeoJSON file
+            max_records: Maximum records per request
+            geometry: Optional spatial filter
+            format: Output format (geojson)
         """
-        # TODO: Implement paged download
-        pass
+        try:
+            query_url = f"{layer_url}/query"
+
+            # Get total count first
+            count_params = {
+                "where": "1=1",
+                "returnCountOnly": "true",
+                "f": "json",
+            }
+            count_result = await self._request(query_url, count_params)
+            total_count = count_result.get("count", 0)
+
+            if total_count == 0:
+                # Empty dataset, write empty FeatureCollection
+                import json
+                with open(output_path, "w") as f:
+                    json.dump({"type": "FeatureCollection", "features": []}, f)
+                return DownloadResult(success=True, output_path=output_path, size_bytes=0)
+
+            # Collect all features
+            all_features = []
+            offset = 0
+
+            while offset < total_count:
+                params = {
+                    "where": "1=1",
+                    "outFields": "*",
+                    "returnGeometry": "true",
+                    "outSR": "4326",
+                    "resultOffset": str(offset),
+                    "resultRecordCount": str(max_records),
+                    "f": "geojson",
+                }
+
+                # Add spatial filter if provided
+                if geometry:
+                    # TODO: Convert GeoJSON geometry to ArcGIS geometry format
+                    pass
+
+                response = await self.client.get(query_url, params=params)
+                response.raise_for_status()
+
+                geojson = response.json()
+                features = geojson.get("features", [])
+
+                if not features:
+                    break
+
+                all_features.extend(features)
+                offset += len(features)
+
+                print(f"Downloaded {offset}/{total_count} features from {layer_url}")
+
+            # Write complete GeoJSON
+            import json
+            result_geojson = {
+                "type": "FeatureCollection",
+                "features": all_features
+            }
+
+            with open(output_path, "w") as f:
+                json.dump(result_geojson, f)
+
+            import os
+            size_bytes = os.path.getsize(output_path)
+
+            return DownloadResult(
+                success=True,
+                output_path=output_path,
+                size_bytes=size_bytes,
+                feature_count=len(all_features),
+            )
+
+        except Exception as e:
+            print(f"Error in paged download: {e}")
+            return DownloadResult(
+                success=False,
+                error=str(e),
+            )
+
+    async def get_preview(
+        self,
+        layer_url: str,
+        limit: int = 100,
+    ) -> Optional[dict]:
+        """
+        Get a preview sample of features from a layer.
+
+        Args:
+            layer_url: Full URL to the layer (e.g., .../FeatureServer/0)
+            limit: Maximum number of features to return
+
+        Returns:
+            GeoJSON FeatureCollection or None if failed
+        """
+        try:
+            query_url = f"{layer_url}/query"
+
+            params = {
+                "where": "1=1",
+                "outFields": "*",
+                "returnGeometry": "true",
+                "outSR": "4326",  # WGS84
+                "resultRecordCount": str(limit),
+                "f": "geojson",
+            }
+
+            response = await self.client.get(query_url, params=params)
+            response.raise_for_status()
+
+            return response.json()
+
+        except Exception as e:
+            print(f"Error fetching preview from {layer_url}: {e}")
+            return None
 
     async def get_feature_count(self, external_id: str) -> Optional[int]:
         """Get the number of features in a dataset."""
@@ -451,27 +572,27 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
     async def fetch_by_oid_range(
         self,
-        external_id: str,
+        layer_url: str,
         min_oid: int,
         max_oid: int,
-        output_path: str,
-    ) -> DownloadResult:
+        oid_field: str = "OBJECTID",
+    ) -> Optional[list]:
         """
         Fetch features within OID range (for parallel downloads).
 
         This is the key to efficient large dataset downloads from ArcGIS.
+
+        Args:
+            layer_url: Full URL to the layer
+            min_oid: Minimum OID value
+            max_oid: Maximum OID value
+            oid_field: Name of the OID field
+
+        Returns:
+            List of GeoJSON features or None if failed
         """
         try:
-            layer_url = f"{self.base_url}/FeatureServer/{external_id}/query"
-
-            # Get OID field name
-            layer_info = await self._request(f"{self.base_url}/FeatureServer/{external_id}")
-            oid_field = "OBJECTID"
-
-            for field in layer_info.get("fields", []):
-                if field.get("type") == "esriFieldTypeOID":
-                    oid_field = field.get("name")
-                    break
+            query_url = f"{layer_url}/query"
 
             params = {
                 "where": f"{oid_field} >= {min_oid} AND {oid_field} <= {max_oid}",
@@ -481,21 +602,139 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 "f": "geojson",
             }
 
-            response = await self.client.get(layer_url, params=params)
+            response = await self.client.get(query_url, params=params)
             response.raise_for_status()
 
-            # Write to file
-            with open(output_path, "wb") as f:
-                f.write(response.content)
+            geojson = response.json()
+            return geojson.get("features", [])
+
+        except Exception as e:
+            print(f"Error fetching OID range {min_oid}-{max_oid}: {e}")
+            return None
+
+    async def download_parallel(
+        self,
+        layer_url: str,
+        output_path: str,
+        num_workers: int = 4,
+        geometry: Optional[dict] = None,
+    ) -> DownloadResult:
+        """
+        Download dataset using parallel OID-range queries.
+
+        This is the most efficient method for large ArcGIS datasets.
+
+        Args:
+            layer_url: Full URL to the layer
+            output_path: Path to save the GeoJSON file
+            num_workers: Number of parallel download workers
+            geometry: Optional spatial filter
+        """
+        try:
+            # Get OID field name from layer info
+            layer_info = await self._request(layer_url)
+            oid_field = "OBJECTID"
+
+            for field in layer_info.get("fields", []):
+                if field.get("type") == "esriFieldTypeOID":
+                    oid_field = field.get("name")
+                    break
+
+            # Get OID range
+            oid_range = await self.get_oid_range_from_url(layer_url, oid_field)
+            if not oid_range:
+                # Fallback to paged download
+                print("Could not get OID range, falling back to paged download")
+                return await self.download_paged(layer_url, output_path)
+
+            min_oid, max_oid = oid_range
+            total_range = max_oid - min_oid + 1
+
+            # Split into chunks
+            chunk_size = max(1, total_range // num_workers)
+            chunks = []
+
+            for i in range(num_workers):
+                chunk_min = min_oid + (i * chunk_size)
+                chunk_max = min(min_oid + ((i + 1) * chunk_size) - 1, max_oid)
+
+                if chunk_min <= max_oid:
+                    chunks.append((chunk_min, chunk_max))
+
+            print(f"Downloading {total_range} OIDs in {len(chunks)} parallel chunks")
+
+            # Download chunks in parallel
+            import asyncio
+            tasks = [
+                self.fetch_by_oid_range(layer_url, chunk_min, chunk_max, oid_field)
+                for chunk_min, chunk_max in chunks
+            ]
+
+            results = await asyncio.gather(*tasks)
+
+            # Combine all features
+            all_features = []
+            for features in results:
+                if features:
+                    all_features.extend(features)
+
+            # Write complete GeoJSON
+            import json
+            result_geojson = {
+                "type": "FeatureCollection",
+                "features": all_features
+            }
+
+            with open(output_path, "w") as f:
+                json.dump(result_geojson, f)
+
+            import os
+            size_bytes = os.path.getsize(output_path)
+
+            print(f"Parallel download complete: {len(all_features)} features, {size_bytes} bytes")
 
             return DownloadResult(
                 success=True,
                 output_path=output_path,
-                size_bytes=len(response.content),
+                size_bytes=size_bytes,
+                feature_count=len(all_features),
             )
 
         except Exception as e:
+            print(f"Error in parallel download: {e}")
             return DownloadResult(
                 success=False,
                 error=str(e),
             )
+
+    async def get_oid_range_from_url(self, layer_url: str, oid_field: str = "OBJECTID") -> Optional[tuple[int, int]]:
+        """
+        Get OID range for a layer from its URL.
+
+        Args:
+            layer_url: Full URL to the layer
+            oid_field: Name of the OID field
+
+        Returns:
+            Tuple of (min_oid, max_oid) or None
+        """
+        try:
+            query_url = f"{layer_url}/query"
+
+            # Query for min/max OID using statistics
+            params = {
+                "outStatistics": f'[{{"statisticType":"min","onStatisticField":"{oid_field}","outStatisticFieldName":"MIN_OID"}},{{"statisticType":"max","onStatisticField":"{oid_field}","outStatisticFieldName":"MAX_OID"}}]',
+                "f": "json",
+            }
+
+            result = await self._request(query_url, params)
+
+            if "features" in result and len(result["features"]) > 0:
+                attrs = result["features"][0]["attributes"]
+                return (attrs.get("MIN_OID"), attrs.get("MAX_OID"))
+
+            return None
+
+        except Exception as e:
+            print(f"Error getting OID range: {e}")
+            return None

@@ -1,12 +1,16 @@
 """Download and export endpoints."""
 
+import os
+import tempfile
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db
 from ..schemas import DownloadRequest, DownloadResponse, JobStatusResponse
-from spheraform_core.models import Dataset, DownloadJob, JobStatus
+from spheraform_core.models import Dataset, DownloadJob, JobStatus, Geoserver, ProviderType
+from spheraform_core.adapters import ArcGISAdapter
 
 router = APIRouter()
 
@@ -113,3 +117,117 @@ async def download_job_result(job_id: UUID, db: Session = Depends(get_db)):
 
     # TODO: Return FileResponse with the actual file
     return {"download_url": job.output_path}
+
+
+@router.get("/{dataset_id}/file")
+async def download_dataset_file(
+    dataset_id: UUID,
+    parallel: bool = True,
+    workers: int = 4,
+    db: Session = Depends(get_db)
+):
+    """
+    Download a dataset file directly.
+
+    For small datasets (<5000 features), uses simple or paged download.
+    For large datasets, uses parallel OID-based download.
+
+    Args:
+        dataset_id: UUID of the dataset
+        parallel: Enable parallel download (default: True)
+        workers: Number of parallel workers (default: 4)
+    """
+    # Get dataset
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset {dataset_id} not found",
+        )
+
+    # Get geoserver
+    geoserver = db.query(Geoserver).filter(Geoserver.id == dataset.geoserver_id).first()
+    if not geoserver:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Geoserver not found for dataset",
+        )
+
+    # Only ArcGIS is currently supported
+    if geoserver.provider_type != ProviderType.ARCGIS:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=f"Download not yet implemented for {geoserver.provider_type}",
+        )
+
+    try:
+        # Create temp file for output
+        temp_fd, temp_path = tempfile.mkstemp(suffix=".geojson", prefix=f"dataset_{dataset_id}_")
+        os.close(temp_fd)  # Close the file descriptor, adapter will write to it
+
+        # Create adapter
+        async with ArcGISAdapter(
+            base_url=geoserver.base_url,
+            connection_config=geoserver.connection_config,
+            country_hint=geoserver.country,
+        ) as adapter:
+            # Decide download strategy based on feature count
+            feature_count = dataset.feature_count or 0
+
+            if feature_count == 0:
+                # Try to get count from server
+                query_url = f"{dataset.access_url}/query"
+                count_result = await adapter._request(query_url, {
+                    "where": "1=1",
+                    "returnCountOnly": "true",
+                    "f": "json"
+                })
+                feature_count = count_result.get("count", 0)
+
+            # Choose download method
+            if feature_count < 5000 and not parallel:
+                # Use simple paged download for small datasets
+                print(f"Using paged download for {feature_count} features")
+                result = await adapter.download_paged(
+                    layer_url=dataset.access_url,
+                    output_path=temp_path,
+                    max_records=1000,
+                )
+            else:
+                # Use parallel download for large datasets
+                print(f"Using parallel download for {feature_count} features with {workers} workers")
+                result = await adapter.download_parallel(
+                    layer_url=dataset.access_url,
+                    output_path=temp_path,
+                    num_workers=workers,
+                )
+
+            if not result.success:
+                # Clean up temp file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Download failed: {result.error}",
+                )
+
+            # Return the file
+            filename = f"{dataset.name.replace(' ', '_')}_{dataset_id}.geojson"
+
+            return FileResponse(
+                path=temp_path,
+                media_type="application/geo+json",
+                filename=filename,
+                background=None,  # File will be deleted by cleanup
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Clean up temp file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Download failed: {str(e)}",
+        )

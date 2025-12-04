@@ -152,14 +152,20 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
                     .first()
                 )
 
+                # Convert bbox tuple to WKT POLYGON for PostGIS
+                bbox_wkt = None
+                if dataset_meta.bbox:
+                    minx, miny, maxx, maxy = dataset_meta.bbox
+                    bbox_wkt = f"POLYGON(({minx} {miny},{maxx} {miny},{maxx} {maxy},{minx} {maxy},{minx} {miny}))"
+
                 if existing:
                     # Update existing dataset
                     existing.name = dataset_meta.name
                     existing.description = dataset_meta.description
                     existing.access_url = dataset_meta.access_url
                     existing.feature_count = dataset_meta.feature_count
-                    existing.bbox = dataset_meta.bbox
-                    existing.themes = dataset_meta.themes
+                    existing.bbox = bbox_wkt
+                    existing.keywords = dataset_meta.keywords
                     existing.updated_at = datetime.utcnow()
                     datasets_updated += 1
                 else:
@@ -171,8 +177,8 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
                         description=dataset_meta.description,
                         access_url=dataset_meta.access_url,
                         feature_count=dataset_meta.feature_count,
-                        bbox=dataset_meta.bbox,
-                        themes=dataset_meta.themes or [],
+                        bbox=bbox_wkt,
+                        keywords=dataset_meta.keywords,
                         is_active=True,
                     )
                     db.add(new_dataset)
