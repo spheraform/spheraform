@@ -80,8 +80,8 @@ services:
   # Spheraform API
   api:
     build:
-      context: ./packages/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/api/Dockerfile
     container_name: spheraform-api
     depends_on:
       postgres:
@@ -106,8 +106,8 @@ services:
   # Spheraform Web Interface
   web:
     build:
-      context: ./packages/web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/web/Dockerfile
     container_name: spheraform-web
     depends_on:
       - api
