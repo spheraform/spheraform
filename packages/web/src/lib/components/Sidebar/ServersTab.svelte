@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import ServerForm from '$lib/components/Modals/ServerForm.svelte';
+	import ConfirmModal from '$lib/components/Modals/ConfirmModal.svelte';
 	import InfoModal from '$lib/components/Modals/InfoModal.svelte';
 
 	interface Server {
@@ -11,6 +12,11 @@
 		country: string;
 		is_active: boolean;
 		last_crawled_at: string | null;
+		// UI state
+		expanded?: boolean;
+		loading?: boolean;
+		crawling?: boolean;
+		datasets?: any[];
 	}
 
 	let servers: Server[] = [];
@@ -19,6 +25,13 @@
 
 	// Modal state
 	let showAddModal = false;
+	let showEditModal = false;
+	let editInitial: any = null;
+	let serverBeingEdited: Server | null = null;
+
+	let showConfirmDelete = false;
+	let serverToDelete: Server | null = null;
+
 	let showInfoModal = false;
 	let infoMessage = '';
 
@@ -26,7 +39,8 @@
 		try {
 			const response = await fetch('/api/v1/servers');
 			if (!response.ok) throw new Error('Failed to fetch servers');
-			servers = await response.json();
+			const list = await response.json();
+			servers = list.map((s: any) => ({ ...s, expanded: false, loading: false, crawling: false }));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Unknown error';
 		} finally {
@@ -72,7 +86,94 @@
 			infoMessage = 'Error crawling server: ' + (e instanceof Error ? e.message : 'Unknown error');
 			showInfoModal = true;
 		}
-	}
+
+    }
+
+		function openEdit(server: Server) {
+			serverBeingEdited = server;
+			editInitial = { name: server.name, base_url: server.base_url, country: server.country };
+			showEditModal = true;
+		}
+
+		async function handleEditSave(e: any) {
+			if (!serverBeingEdited) return;
+			const payload = e.detail || {};
+			try {
+				const res = await fetch(`/api/v1/servers/${serverBeingEdited.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+				if (!res.ok) throw new Error('Failed to update server');
+				const updated = await res.json();
+				servers = servers.map(s => s.id === serverBeingEdited!.id ? { ...s, ...updated } : s);
+				infoMessage = 'Server updated'; showInfoModal = true;
+			} catch (err) {
+				infoMessage = 'Error updating server: ' + (err instanceof Error ? err.message : String(err)); showInfoModal = true;
+			} finally {
+				showEditModal = false; serverBeingEdited = null;
+			}
+		}
+
+		function confirmDelete(server: Server) {
+			serverToDelete = server;
+			showConfirmDelete = true;
+		}
+
+		async function handleDeleteConfirm() {
+			if (!serverToDelete) return;
+			try {
+				const res = await fetch(`/api/v1/servers/${serverToDelete.id}`, { method: 'DELETE' });
+				if (!res.ok && res.status !== 204) throw new Error('Failed to delete');
+				servers = servers.filter(s => s.id !== serverToDelete!.id);
+				infoMessage = 'Server deleted'; showInfoModal = true;
+			} catch (err) {
+				infoMessage = 'Error deleting server: ' + (err instanceof Error ? err.message : String(err)); showInfoModal = true;
+			} finally {
+				showConfirmDelete = false; serverToDelete = null;
+			}
+		}
+
+		async function toggleServer(server: any) {
+			if (!server.expanded && !server.datasets) {
+				server.loading = true;
+				try {
+					const res = await fetch(`/api/v1/datasets?geoserver_id=${server.id}&limit=1000`);
+					if (!res.ok) throw new Error('Failed to fetch datasets');
+					server.datasets = await res.json();
+				} catch (err) {
+					infoMessage = 'Error loading datasets: ' + (err instanceof Error ? err.message : String(err)); showInfoModal = true;
+				} finally {
+					server.loading = false;
+				}
+			}
+			server.expanded = !server.expanded;
+			servers = [...servers];
+		}
+
+		async function downloadDataset(dataset: any, e?: Event) {
+			e && e.stopPropagation();
+			try {
+				if (dataset.is_cached) {
+					const res = await fetch(`/api/v1/download?dataset_ids=${dataset.id}&format=geojson`);
+					if (!res.ok) throw new Error('Failed to download file');
+					const blob = await res.blob();
+					const url = window.URL.createObjectURL(blob);
+					const a = document.createElement('a'); a.href = url; a.download = `${dataset.name || 'dataset'}.geojson`; document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url);
+				} else {
+					// start download/cache job
+					const res = await fetch('/api/v1/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_ids: [dataset.id], format: 'geojson' }) });
+					if (!res.ok) throw new Error('Failed to start download job');
+					const data = await res.json();
+					if (data.download_url) {
+						// immediate download available
+						window.location.href = data.download_url;
+					} else {
+						infoMessage = 'Download started. When caching completes, you can download the GeoJSON from cache.';
+						showInfoModal = true;
+					}
+				}
+			} catch (err) {
+				infoMessage = 'Error downloading dataset: ' + (err instanceof Error ? err.message : String(err)); showInfoModal = true;
+			}
+		}
+
 </script>
 
 <div class="servers-tab">
@@ -89,6 +190,8 @@
 
 	<!-- Modals -->
 	<ServerForm open={showAddModal} mode="add" on:save={handleAddSave} on:close={() => showAddModal = false} />
+	<ServerForm open={showEditModal} initial={editInitial} mode="edit" on:save={handleEditSave} on:close={() => { showEditModal = false; serverBeingEdited = null; }} />
+	<ConfirmModal open={showConfirmDelete} title="Delete Server" message={serverToDelete ? `Delete server "${serverToDelete.name}"? This will remove its datasets from the catalogue.` : ''} on:confirm={handleDeleteConfirm} on:close={() => { showConfirmDelete = false; serverToDelete = null; }} />
 	<InfoModal open={showInfoModal} message={infoMessage} on:close={() => showInfoModal = false} />
 
 	{#if loading}
@@ -114,9 +217,38 @@
 							{/if}
 						</div>
 					</div>
-					<button class="crawl-btn" on:click={() => crawlServer(server.id)}>
-						Crawl
-					</button>
+					<div class="server-actions">
+						<button class="action-btn" on:click={() => toggleServer(server)}>{server.expanded ? 'Hide' : 'Datasets'}</button>
+						<button class="edit-btn" on:click|stopPropagation={() => openEdit(server)}>Edit</button>
+						<button class="crawl-btn" on:click|stopPropagation={() => crawlServer(server.id)} disabled={server.crawling}>{server.crawling ? 'Crawling...' : 'Crawl'}</button>
+						<button class="delete-btn danger" on:click|stopPropagation={() => confirmDelete(server)}>Delete</button>
+					</div>
+
+					{#if server.expanded}
+						<div class="datasets-section">
+							{#if server.loading}
+								<div class="datasets-loading">Loading datasets...</div>
+							{:else if server.datasets && server.datasets.length > 0}
+								<div class="dataset-list">
+									{#each server.datasets as dataset}
+										<div class="dataset-card">
+											<div class="dataset-info">
+												<div class="dataset-name">{dataset.name}</div>
+												<div class="dataset-meta">
+													{#if dataset.feature_count}
+														<span class="badge">{dataset.feature_count.toLocaleString()} features</span>
+													{/if}
+												</div>
+											</div>
+											<button class="download-btn" on:click|stopPropagation={(e) => downloadDataset(dataset, e)}>{dataset.is_cached ? 'Download' : 'Fetch & Cache'}</button>
+										</div>
+									{/each}
+								</div>
+							{:else}
+								<div class="datasets-empty">No datasets. Try crawling the server.</div>
+							{/if}
+						</div>
+					{/if}
 				</div>
 			{/each}
 		</div>
@@ -243,6 +375,36 @@
 	}
 
 	.crawl-btn:hover {
+		background: rgba(0, 0, 0, 0.05);
+	}
+
+	.edit-btn {
+		padding: 8px 16px;
+		border: 1px solid rgba(0, 0, 0, 0.2);
+		background: white;
+		border-radius: 8px;
+		cursor: pointer;
+		font-size: 13px;
+		transition: all 0.2s;
+		white-space: nowrap;
+	}
+
+	.edit-btn:hover {
+		background: rgba(0, 0, 0, 0.05);
+	}
+
+	.delete-btn {
+		padding: 8px 16px;
+		border: 1px solid rgba(248, 37, 37, 0.759);
+		background: rgba(238, 128, 128, 0.207);
+		border-radius: 8px;
+		cursor: pointer;
+		font-size: 13px;
+		transition: all 0.2s;
+		white-space: nowrap;
+	}
+
+	.delete-btn:hover {
 		background: rgba(0, 0, 0, 0.05);
 	}
 </style>

@@ -3,20 +3,20 @@
   import Modal from './Modal.svelte';
 
   export let open: boolean = false;
-  export let initial: { name?: string; base_url?: string; country?: string } = {};
+  export let initial: { name?: string; base_url?: string; country?: string } | null = {};
   export let mode: 'add' | 'edit' = 'add';
 
   const dispatch = createEventDispatcher();
 
-  let name = initial.name ?? '';
-  let base_url = initial.base_url ?? '';
-  let country = initial.country ?? '';
+  let name = initial?.name ?? '';
+  let base_url = initial?.base_url ?? '';
+  let country = initial?.country ?? '';
 
+  // Re-populate form when opened or when initial data changes
   $: if (open) {
-    // reset fields when opened with new initial
-    name = initial.name ?? '';
-    base_url = initial.base_url ?? '';
-    country = initial.country ?? '';
+    name = initial?.name ?? '';
+    base_url = initial?.base_url ?? '';
+    country = initial?.country ?? '';
   }
 
   function onSave() {

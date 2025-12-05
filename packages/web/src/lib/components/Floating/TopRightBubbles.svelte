@@ -1,6 +1,12 @@
 <script lang="ts">
+	import InfoModal from '$lib/components/Modals/InfoModal.svelte';
+
 	let docsOpen = false;
 	let userOpen = false;
+
+	// Modal state for informational popups replacing alert()
+	let showInfoModal = false;
+	let infoMessage = '';
 
 	function toggleDocs() {
 		docsOpen = !docsOpen;
@@ -10,6 +16,19 @@
 	function toggleUser() {
 		userOpen = !userOpen;
 		docsOpen = false;
+	}
+
+	function showInfo(msg: string) {
+		infoMessage = msg;
+		showInfoModal = true;
+		// close menus for clarity
+		docsOpen = false;
+		userOpen = false;
+	}
+
+	function closeInfo() {
+		showInfoModal = false;
+		infoMessage = '';
 	}
 </script>
 
@@ -24,8 +43,8 @@
 		{#if docsOpen}
 			<div class="dropdown">
 				<a href="https://github.com/spheraform/spheraform" target="_blank">GitHub</a>
-				<a href="#" on:click|preventDefault={() => alert('API Docs')}>API Docs</a>
-				<a href="#" on:click|preventDefault={() => alert('About')}>About</a>
+				<a href="#" on:click|preventDefault={() => showInfo('API Docs')}>API Docs</a>
+				<a href="#" on:click|preventDefault={() => showInfo('About')}>About</a>
 			</div>
 		{/if}
 	</div>
@@ -38,14 +57,16 @@
 			</svg>
 		</button>
 		{#if userOpen}
-			<div class="dropdown">
-				<a href="#" on:click|preventDefault={() => alert('Profile')}>Profile</a>
-				<a href="#" on:click|preventDefault={() => alert('Settings')}>Settings</a>
-				<a href="#" on:click|preventDefault={() => alert('Logout')}>Logout</a>
-			</div>
+				<div class="dropdown">
+					<a href="#" on:click|preventDefault={() => showInfo('Profile')}>Profile</a>
+					<a href="#" on:click|preventDefault={() => showInfo('Settings')}>Settings</a>
+					<a href="#" on:click|preventDefault={() => showInfo('Logout')}>Logout</a>
+				</div>
 		{/if}
 	</div>
 </div>
+
+<InfoModal open={showInfoModal} message={infoMessage} on:close={closeInfo} />
 
 <style>
 	.top-right {
