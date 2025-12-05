@@ -1,5 +1,6 @@
 """Download and export endpoints."""
 
+import logging
 import os
 import tempfile
 from uuid import UUID
@@ -12,6 +13,7 @@ from ..schemas import DownloadRequest, DownloadResponse, JobStatusResponse
 from spheraform_core.models import Dataset, DownloadJob, JobStatus, Geoserver, ProviderType
 from spheraform_core.adapters import ArcGISAdapter
 
+logger = logging.getLogger("gunicorn.error")
 router = APIRouter()
 
 
@@ -122,20 +124,18 @@ async def download_job_result(job_id: UUID, db: Session = Depends(get_db)):
 @router.get("/{dataset_id}/file")
 async def download_dataset_file(
     dataset_id: UUID,
-    parallel: bool = True,
-    workers: int = 4,
+    force_refresh: bool = False,
     db: Session = Depends(get_db)
 ):
     """
-    Download a dataset file directly.
+    Download a cached dataset file.
 
-    For small datasets (<5000 features), uses simple or paged download.
-    For large datasets, uses parallel OID-based download.
+    This endpoint serves cached data. If the dataset is not cached, returns 404.
+    Use POST /api/v1/download to fetch and cache datasets first.
 
     Args:
         dataset_id: UUID of the dataset
-        parallel: Enable parallel download (default: True)
-        workers: Number of parallel workers (default: 4)
+        force_refresh: If True, re-fetch from source even if cached (default: False)
     """
     # Get dataset
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
@@ -145,75 +145,74 @@ async def download_dataset_file(
             detail=f"Dataset {dataset_id} not found",
         )
 
-    # Get geoserver
-    geoserver = db.query(Geoserver).filter(Geoserver.id == dataset.geoserver_id).first()
-    if not geoserver:
+    # Check if dataset is cached
+    if not force_refresh and not dataset.is_cached:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Geoserver not found for dataset",
+            detail=f"Dataset not cached. Use POST /api/v1/download to fetch it first.",
         )
 
-    # Only ArcGIS is currently supported
-    if geoserver.provider_type != ProviderType.ARCGIS:
+    # If force_refresh or not cached, trigger fetch job
+    if force_refresh or not dataset.is_cached:
+        # Create download job
+        job = DownloadJob(
+            dataset_id=dataset.id,
+            status=JobStatus.PENDING,
+            strategy=dataset.download_strategy.value,
+            chunks_completed=0,
+            retry_count=0,
+            params={
+                "dataset_ids": [str(dataset.id)],
+                "format": "geojson",
+            },
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        # TODO: Queue job for background worker
+        # For now, return job_id and let client poll
         raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail=f"Download not yet implemented for {geoserver.provider_type}",
+            status_code=status.HTTP_202_ACCEPTED,
+            detail={
+                "message": "Dataset fetch queued",
+                "job_id": str(job.id),
+                "poll_url": f"/api/v1/download/jobs/{job.id}",
+            },
         )
 
-    try:
-        # Create temp file for output
-        temp_fd, temp_path = tempfile.mkstemp(suffix=".geojson", prefix=f"dataset_{dataset_id}_")
-        os.close(temp_fd)  # Close the file descriptor, adapter will write to it
+    # Dataset is cached - check if we have a cache_table (PostGIS) or file
+    if dataset.cache_table:
+        # Export from PostGIS table to GeoJSON file
+        try:
+            import json
+            from sqlalchemy import text
 
-        # Create adapter
-        async with ArcGISAdapter(
-            base_url=geoserver.base_url,
-            connection_config=geoserver.connection_config,
-            country_hint=geoserver.country,
-        ) as adapter:
-            # Get feature count for logging
-            feature_count = dataset.feature_count or 0
+            # Create temp file
+            temp_fd, temp_path = tempfile.mkstemp(suffix=".geojson", prefix=f"dataset_{dataset_id}_")
+            os.close(temp_fd)
 
-            if feature_count == 0:
-                # Try to get count from server
-                query_url = f"{dataset.access_url}/query"
-                count_result = await adapter._request(query_url, {
-                    "where": "1=1",
-                    "returnCountOnly": "true",
-                    "f": "json"
-                })
-                feature_count = count_result.get("count", 0)
-
-            # Choose download method - check parallel parameter FIRST
-            if parallel and feature_count >= 5000:
-                # Use parallel download for large datasets when parallel is enabled
-                print(f"Using parallel download for {feature_count} features with {workers} workers")
-                result = await adapter.download_parallel(
-                    layer_url=dataset.access_url,
-                    output_path=temp_path,
-                    num_workers=workers,
+            # Query PostGIS table and export as GeoJSON
+            # Use ST_AsGeoJSON to convert geometry to GeoJSON
+            query = text(f"""
+                SELECT jsonb_build_object(
+                    'type', 'FeatureCollection',
+                    'features', jsonb_agg(
+                        jsonb_build_object(
+                            'type', 'Feature',
+                            'geometry', ST_AsGeoJSON(geom)::jsonb,
+                            'properties', properties
+                        )
+                    )
                 )
-            else:
-                # Use paged download for all other cases:
-                # - When parallel is explicitly disabled (parallel=false)
-                # - When dataset is small (< 5000 features)
-                # - When feature count is unknown
-                reason = "parallel disabled" if not parallel else f"small dataset ({feature_count} features)"
-                print(f"Using paged download: {reason}")
-                result = await adapter.download_paged(
-                    layer_url=dataset.access_url,
-                    output_path=temp_path,
-                    max_records=1000,
-                )
+                FROM {dataset.cache_table}
+            """)
 
-            if not result.success:
-                # Clean up temp file
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Download failed: {result.error}",
-                )
+            result = db.execute(query).scalar()
+
+            # Write to file
+            with open(temp_path, 'w') as f:
+                json.dump(result, f)
 
             # Return the file
             filename = f"{dataset.name.replace(' ', '_')}_{dataset_id}.geojson"
@@ -222,16 +221,20 @@ async def download_dataset_file(
                 path=temp_path,
                 media_type="application/geo+json",
                 filename=filename,
-                background=None,  # File will be deleted by cleanup
+                background=None,
             )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Clean up temp file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        except Exception as e:
+            logger.error(f"Failed to export from PostGIS: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to export cached data: {str(e)}",
+            )
+    else:
+        # No cache available
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Download failed: {str(e)}",
+            detail="Dataset marked as cached but no cache_table found",
         )

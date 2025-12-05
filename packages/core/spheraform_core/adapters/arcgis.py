@@ -1,6 +1,7 @@
 """ArcGIS REST API adapter."""
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import AsyncIterator, Optional, Dict
 import uuid
@@ -17,6 +18,7 @@ from .base import (
 )
 from ..proxy import proxy_manager
 
+logger = logging.getLogger("gunicorn.error")
 
 class ArcGISAdapter(BaseGeoserverAdapter):
     """
@@ -39,11 +41,13 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         self.country_hint = country_hint
 
         # Use browser-like headers to avoid WAF blocking
+        # Note: Do NOT include "br" (brotli) in Accept-Encoding unless brotli is installed
+        # httpx will not auto-decompress brotli responses without the brotli library
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
-            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Encoding": "gzip, deflate",
             "DNT": "1",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
@@ -59,9 +63,9 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
         # Log proxy usage
         if proxy_url:
-            print(f"ArcGIS adapter using proxy: {proxy_url} for {base_url}")
+            logger.info(f"ArcGIS adapter using proxy: {proxy_url} for {base_url}")
         else:
-            print(f"ArcGIS adapter NOT using proxy for {base_url}")
+            logger.info(f"ArcGIS adapter NOT using proxy for {base_url}")
 
         # Create HTTP client with optional proxy
         client_kwargs = {
@@ -93,15 +97,33 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         try:
             response = await self.client.get(url, params=params, headers=headers)
             response.raise_for_status()
-            return response.json()
+
+            # Get raw content bytes
+            content = response.content
+
+            # Check if content is gzipped and manually decompress if needed
+            # Gzip files start with magic number 0x1f8b
+            import gzip
+            import json
+
+            if content[:2] == b'\x1f\x8b':
+                # Content is gzipped, decompress it
+                content = gzip.decompress(content)
+
+            # Decode and parse JSON
+            return json.loads(content.decode('utf-8'))
         except Exception as e:
             # Log response details for debugging
             if hasattr(e, 'response') and e.response is not None:
-                print(f"Request failed for {url}: {e}")
-                print(f"Response status: {e.response.status_code}")
-                print(f"Response body (first 500 chars): {e.response.text[:500]}")
+                logger.debug(f"Request failed for {url}: {e}")
+                logger.debug(f"Response status: {e.response.status_code}")
+                # Try to get response body, but handle if it's compressed
+                try:
+                    logger.debug(f"Response body (first 500 chars): {e.response.text[:500]}")
+                except:
+                    logger.debug(f"Response body (raw, first 100 bytes): {e.response.content[:100]}")
             else:
-                print(f"Request failed for {url}: {e}")
+                logger.debug(f"Request failed for {url}: {e}")
             raise
 
     async def probe_capabilities(self) -> ServerCapabilities:
@@ -164,25 +186,33 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         """
         try:
             # Get root catalog
+            logger.info(f"Fetching root catalog from {self.base_url}")
             catalog = await self._request(self.base_url)
+            logger.info(f"Root catalog response keys: {list(catalog.keys())}")
+            logger.info(f"Services at root: {len(catalog.get('services', []))} services")
+            logger.info(f"Folders at root: {len(catalog.get('folders', []))} folders")
 
             # Process services at root level
             for service in catalog.get("services", []):
+                logger.info(f"Processing root service: {service.get('name')} ({service.get('type')})")
                 async for dataset in self._process_service(service):
                     yield dataset
 
             # Process folders
             for folder in catalog.get("folders", []):
+                logger.info(f"Processing folder: {folder}")
                 folder_url = f"{self.base_url}/{folder}"
                 folder_catalog = await self._request(folder_url)
+                logger.info(f"Folder catalog has {len(folder_catalog.get('services', []))} services")
 
                 for service in folder_catalog.get("services", []):
+                    logger.info(f"Processing folder service: {service.get('name')} ({service.get('type')})")
                     async for dataset in self._process_service(service):
                         yield dataset
 
         except Exception as e:
             # Log error but don't fail completely
-            print(f"Error discovering datasets: {e}")
+            logger.exception(f"Error discovering datasets: {e}")
 
     async def _process_service(self, service: dict) -> AsyncIterator[DatasetMetadata]:
         """Process a single ArcGIS service and yield its layers."""
@@ -191,30 +221,39 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
         # Only process FeatureServers (MapServers can also work but focus on Feature first)
         if service_type not in ["FeatureServer", "MapServer"]:
+            logger.info(f"Skipping service {service_name} with type {service_type} (not FeatureServer/MapServer)")
             return
 
         service_url = f"{self.base_url}/{service_name}/{service_type}"
 
+        # Extract the map/service name (last part after any /)
+        # e.g., "Public/EnvironmentConservation" -> "EnvironmentConservation"
+        map_name = service_name.split('/')[-1] if service_name else "Unknown"
+
         try:
+            logger.info(f"Fetching service info from {service_url}")
             service_info = await self._request(service_url)
+            logger.info(f"Service info keys: {list(service_info.keys())}")
+            logger.info(f"Service has {len(service_info.get('layers', []))} layers")
 
             # Process each layer in the service
             for layer in service_info.get("layers", []):
                 layer_id = layer.get("id")
                 layer_name = layer.get("name")
+                logger.info(f"Processing layer {layer_id}: {layer_name}")
 
                 # Get detailed layer information
                 layer_url = f"{service_url}/{layer_id}"
                 layer_info = await self._request(layer_url)
 
                 # Extract metadata
-                metadata = self._extract_metadata(layer_info, layer_url)
+                metadata = self._extract_metadata(layer_info, layer_url, map_name)
                 yield metadata
 
         except Exception as e:
-            print(f"Error processing service {service_name}: {e}")
+            logger.exception(f"Error processing service {service_name}: {e}")
 
-    def _extract_metadata(self, layer_info: dict, layer_url: str) -> DatasetMetadata:
+    def _extract_metadata(self, layer_info: dict, layer_url: str, map_name: str = None) -> DatasetMetadata:
         """Extract metadata from ArcGIS layer info."""
         # Parse extent to bbox
         bbox = None
@@ -238,9 +277,17 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             # Simple keyword extraction - can be improved
             keywords = layer_info["description"].split()[:10]
 
+        # Combine map/service name with layer name for better clarity
+        layer_name = layer_info.get("name", "Unnamed Layer")
+        if map_name:
+            # Combine map name and layer name with a hyphen
+            dataset_name = f"{map_name} - {layer_name}"
+        else:
+            dataset_name = layer_name
+
         return DatasetMetadata(
             external_id=str(layer_info.get("id")),
-            name=layer_info.get("name", "Unnamed Layer"),
+            name=dataset_name,
             access_url=layer_url,
             description=layer_info.get("description"),
             keywords=keywords,
@@ -452,7 +499,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 all_features.extend(features)
                 offset += len(features)
 
-                print(f"Downloaded {offset}/{total_count} features from {layer_url}")
+                logger.debug(f"Downloaded {offset}/{total_count} features from {layer_url}")
 
             # Write complete GeoJSON
             import json
@@ -475,7 +522,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             )
 
         except Exception as e:
-            print(f"Error in paged download: {e}")
+            logger.error(f"Error in paged download: {e}")
             return DownloadResult(
                 success=False,
                 error=str(e),
@@ -514,7 +561,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             return response.json()
 
         except Exception as e:
-            print(f"Error fetching preview from {layer_url}: {e}")
+            logger.error(f"Error fetching preview from {layer_url}: {e}")
             return None
 
     async def get_feature_count(self, external_id: str) -> Optional[int]:
@@ -567,7 +614,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             return None
 
         except Exception as e:
-            print(f"Error getting OID range: {e}")
+            logger.debug(f"Error getting OID range: {e}")
             return None
 
     async def fetch_by_oid_range(
@@ -609,7 +656,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             return geojson.get("features", [])
 
         except Exception as e:
-            print(f"Error fetching OID range {min_oid}-{max_oid}: {e}")
+            logger.error(f"Error fetching OID range {min_oid}-{max_oid}: {e}")
             return None
 
     async def download_parallel(
@@ -644,7 +691,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             oid_range = await self.get_oid_range_from_url(layer_url, oid_field)
             if not oid_range:
                 # Fallback to paged download
-                print("Could not get OID range, falling back to paged download")
+                logger.debug("Could not get OID range, falling back to paged download")
                 return await self.download_paged(layer_url, output_path)
 
             min_oid, max_oid = oid_range
@@ -661,7 +708,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 if chunk_min <= max_oid:
                     chunks.append((chunk_min, chunk_max))
 
-            print(f"Downloading {total_range} OIDs in {len(chunks)} parallel chunks")
+            logger.info(f"Downloading {total_range} OIDs in {len(chunks)} parallel chunks")
 
             # Download chunks in parallel
             import asyncio
@@ -691,7 +738,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             import os
             size_bytes = os.path.getsize(output_path)
 
-            print(f"Parallel download complete: {len(all_features)} features, {size_bytes} bytes")
+            logger.info(f"Parallel download complete: {len(all_features)} features, {size_bytes} bytes")
 
             return DownloadResult(
                 success=True,
@@ -701,7 +748,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             )
 
         except Exception as e:
-            print(f"Error in parallel download: {e}")
+            logger.error(f"Error in parallel download: {e}")
             return DownloadResult(
                 success=False,
                 error=str(e),
@@ -736,5 +783,5 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             return None
 
         except Exception as e:
-            print(f"Error getting OID range: {e}")
+            logger.debug(f"Error getting OID range: {e}")
             return None

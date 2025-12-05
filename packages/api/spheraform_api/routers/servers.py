@@ -1,5 +1,5 @@
 """Server management endpoints."""
-
+import logging
 from typing import List
 from uuid import UUID
 from datetime import datetime
@@ -12,6 +12,7 @@ from spheraform_core.models import Geoserver, HealthStatus, Dataset, ProviderTyp
 from spheraform_core.adapters import ArcGISAdapter
 
 router = APIRouter()
+logger = logging.getLogger("gunicorn.error")
 
 
 @router.post("", response_model=ServerResponse, status_code=status.HTTP_201_CREATED)
