@@ -14,9 +14,9 @@
 				sources: {
 					'osm': {
 						type: 'raster',
-						tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+						tiles: ['https://tiles.stadiamaps.com/tiles/stamen_toner-dark/{z}/{x}/{y}.png'],
 						tileSize: 256,
-						attribution: '&copy; OpenStreetMap Contributors'
+						attribution: '&copy; Stadia Maps, &copy: Stamen Design, &copy; OpenMapTiles &copy; OpenStreetMap contributors'
 					}
 				},
 				layers: [

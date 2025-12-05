@@ -21,7 +21,7 @@
 		height: 48px;
 		border: none;
 		border-radius: 50%;
-		background: var(--glass-bg);
+		background: rgba(255, 255, 255, 0.8);
 		backdrop-filter: blur(10px);
 		-webkit-backdrop-filter: blur(10px);
 		border: 1px solid var(--glass-border);
@@ -35,7 +35,7 @@
 	}
 
 	.menu-bubble:hover {
-		background: rgba(255, 255, 255, 0.2);
+		background: rgba(255, 255, 255, 0.8);
 		transform: scale(1.05);
 	}
 

@@ -36,7 +36,7 @@
 		gap: 12px;
 		padding: 12px 20px;
 		min-width: 300px;
-		background: var(--glass-bg);
+		background: rgba(255, 255, 255, 0.95);
 		backdrop-filter: blur(10px);
 		-webkit-backdrop-filter: blur(10px);
 		border: 1px solid var(--glass-border);
