@@ -103,6 +103,21 @@ services:
       - ./packages/core:/app/core
     restart: unless-stopped
 
+  # Spheraform Web Interface
+  web:
+    build:
+      context: ./packages/web
+      dockerfile: Dockerfile
+    container_name: spheraform-web
+    depends_on:
+      - api
+    environment:
+      API_URL: http://api:8000
+      ORIGIN: http://localhost:5173
+    ports:
+      - "5173:3000"
+    restart: unless-stopped
+
   # TiTiler - Commented out due to no ARM64 support
   # Uncomment if you're on x86_64 architecture
   # titiler:
