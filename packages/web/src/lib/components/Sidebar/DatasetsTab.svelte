@@ -7,6 +7,8 @@
 		description: string | null;
 		feature_count: number | null;
 		is_active: boolean;
+		access_url?: string;
+		updated_at?: string | null;
 	}
 
 	let datasets: Dataset[] = [];
@@ -70,6 +72,14 @@
 							{#if dataset.feature_count}
 								<span class="badge">{dataset.feature_count.toLocaleString()} features</span>
 							{/if}
+							<div class="info-tooltip">
+								<button class="info-btn" aria-label="More info">i</button>
+								<div class="tooltip-content">
+									<div><strong>URL:</strong> <a href="{dataset.access_url}" target="_blank" rel="noopener noreferrer">{dataset.access_url}</a></div>
+									<div><strong>Updated:</strong> {dataset.updated_at ? new Date(dataset.updated_at).toLocaleString() : 'N/A'}</div>
+									<div><strong>Features:</strong> {dataset.feature_count ?? 'N/A'}</div>
+								</div>
+							</div>
 							{#if !dataset.is_active}
 								<span class="badge inactive">Inactive</span>
 							{/if}
@@ -163,8 +173,46 @@
 		color: var(--text-secondary);
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
+		line-clamp: 2;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
+	}
+
+	/* Tooltip styles (same as ServersTab) */
+	.info-tooltip {
+		position: relative;
+		display: inline-block;
+	}
+
+	.info-btn {
+		width: 20px;
+		height: 20px;
+		border-radius: 50%;
+		border: 1px solid rgba(0,0,0,0.15);
+		background: white;
+		font-size: 12px;
+		line-height: 18px;
+		padding: 0;
+		cursor: pointer;
+	}
+
+	.tooltip-content {
+		position: absolute;
+		left: 24px;
+		top: -6px;
+		min-width: 220px;
+		background: white;
+		border: 1px solid rgba(0,0,0,0.12);
+		padding: 8px;
+		border-radius: 6px;
+		box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+		display: none;
+		z-index: 40;
+		font-size: 12px;
+	}
+
+	.info-tooltip:hover .tooltip-content {
+		display: block;
 	}
 
 	.meta {
