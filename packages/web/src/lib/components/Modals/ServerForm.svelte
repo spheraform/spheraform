@@ -8,15 +8,20 @@
 
   const dispatch = createEventDispatcher();
 
-  let name = initial?.name ?? '';
-  let base_url = initial?.base_url ?? '';
-  let country = initial?.country ?? '';
+  let name = '';
+  let base_url = '';
+  let country = '';
 
-  // Re-populate form when opened or when initial data changes
-  $: if (open) {
+  let wasOpen = false;
+
+  // Re-populate form only when modal first opens
+  $: if (open && !wasOpen) {
     name = initial?.name ?? '';
     base_url = initial?.base_url ?? '';
     country = initial?.country ?? '';
+    wasOpen = true;
+  } else if (!open) {
+    wasOpen = false;
   }
 
   function onSave() {
