@@ -9,23 +9,6 @@ This guide shows how to use the Spheraform API with real ArcGIS servers.
 **Example Layer:** Environment Conservation MapServer Layer 2
 **Layer URL:** `https://gisext.south-ayrshire.gov.uk/server/rest/services/Public/EnvironmentConservation/MapServer/2`
 
-## Prerequisites
-
-Start the API server:
-
-```bash
-# Start PostgreSQL and other services
-docker-compose up -d
-
-# Run database migrations
-cd packages/core
-DATABASE_URL="postgresql+psycopg://spheraform:spheraform_dev@localhost:5432/spheraform" alembic upgrade head
-
-# Start the API
-cd ../api
-uvicorn spheraform_api.main:app --reload --port 8000
-```
-
 ## 1. Register the ArcGIS Server
 
 First, add the South Ayrshire GIS server to Spheraform:
