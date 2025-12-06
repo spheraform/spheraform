@@ -13,7 +13,7 @@
 		country: string;
 		is_active: boolean;
 		health_status: string | null;
-		last_crawled_at: string | null;
+		last_crawl: string | null;
 		// UI state
 		expanded?: boolean;
 		loading?: boolean;
@@ -77,6 +77,7 @@
 			const response = await fetch('/api/v1/servers');
 			if (!response.ok) throw new Error('Failed to fetch servers');
 			const list = await response.json();
+			console.log('Servers loaded:', list);
 			servers = list.map((s: any) => ({ ...s, expanded: false, loading: false, crawling: false }));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Unknown error';
@@ -310,7 +311,7 @@
 			{ label: 'URL', value: server.base_url, link: true },
 			{ label: 'Datasets', value: String(server.datasets?.length || 0) },
 			{ label: 'Status', value: server.health_status || 'Unknown' },
-			{ label: 'Last Crawl', value: server.last_crawled_at ? new Date(server.last_crawled_at).toLocaleString() : 'Never' }
+			{ label: 'Last Crawl', value: server.last_crawl ? new Date(server.last_crawl).toLocaleString() : 'Never' }
 		];
 		showDetailModal = true;
 	}
