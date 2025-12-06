@@ -46,6 +46,8 @@
 				<a href="https://github.com/spheraform/spheraform" target="_blank">GitHub</a>
 				<a href="/docs/api">API Docs</a>
 				<a href="/docs/about">About</a>
+				<a href="https://github.com/spheraform/spheraform/issues" target="_blank">Report a bug 🐛</a>
+
 			</div>
 		{/if}
 	</div>

@@ -326,11 +326,28 @@
 			detailModalRows.push({ label: 'URL', value: dataset.url, link: true });
 		}
 		detailModalRows.push(
-			{ label: 'Extent', value: formatExtent(dataset.extent) },
 			{ label: 'Features', value: dataset.feature_count?.toLocaleString() || 'N/A' }
 		);
+		if (dataset.geometry_type) {
+			detailModalRows.push({ label: 'Geometry Type', value: dataset.geometry_type });
+		}
+		if (dataset.source_srid) {
+			detailModalRows.push({ label: 'Source SRID', value: String(dataset.source_srid) });
+		}
+		if (dataset.bbox) {
+			detailModalRows.push({ label: 'Bbox', value: dataset.bbox.substring(0, 100) + (dataset.bbox.length > 100 ? '...' : '') });
+		}
+		if (dataset.themes && dataset.themes.length > 0) {
+			detailModalRows.push({ label: 'Themes', value: dataset.themes.join(', ') });
+		}
 		if (dataset.keywords && dataset.keywords.length > 0) {
 			detailModalRows.push({ label: 'Keywords', value: dataset.keywords.join(', ') });
+		}
+		if (dataset.last_fetched_at) {
+			detailModalRows.push({ label: 'Last Fetched', value: new Date(dataset.last_fetched_at).toLocaleString() });
+		}
+		if (dataset.is_cached) {
+			detailModalRows.push({ label: 'Cache Status', value: 'Cached ✓' });
 		}
 
 		showDetailModal = true;
@@ -446,12 +463,29 @@
 							{:else if server.datasets && server.datasets.length > 0}
 								<div class="dataset-list">
 									{#each server.datasets as dataset}
-										<div class="dataset-card">
+										<div class="dataset-card" class:cached={dataset.is_cached}>
 											<div class="dataset-row">
-												<span class="dataset-name">{dataset.name}</span>
-												{#if dataset.feature_count}
-													<span class="badge feature-badge">{dataset.feature_count.toLocaleString()}</span>
-												{/if}
+												<div class="dataset-info">
+													<div class="dataset-title-row">
+														<span class="dataset-name">{dataset.name}</span>
+														{#if dataset.is_cached}
+															<span class="cached-check" title="Cached and ready">✓</span>
+														{/if}
+													</div>
+													<div class="dataset-meta">
+														{#if dataset.feature_count}
+															<span class="badge feature-badge">{dataset.feature_count.toLocaleString()}</span>
+														{/if}
+														{#if dataset.themes && dataset.themes.length > 0}
+															{#each dataset.themes.slice(0, 2) as theme}
+																<span class="badge theme-badge">{theme.replace(/_/g, ' ')}</span>
+															{/each}
+														{/if}
+														{#if dataset.geometry_type}
+															<span class="badge geom-badge">{dataset.geometry_type}</span>
+														{/if}
+													</div>
+												</div>
 												<div class="dataset-actions">
 													<button class="icon-btn info-btn" on:click|stopPropagation={() => showDatasetDetails(dataset)} title="View Details">
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -677,9 +711,18 @@
 		transition: all 0.2s;
 	}
 
+	.dataset-card.cached {
+		background: rgba(34, 197, 94, 0.05);
+		border-color: rgba(34, 197, 94, 0.2);
+	}
+
 	.dataset-card:hover {
 		background: rgba(0, 0, 0, 0.04);
 		border-color: rgba(0, 0, 0, 0.15);
+	}
+
+	.dataset-card.cached:hover {
+		background: rgba(34, 197, 94, 0.08);
 	}
 
 	.dataset-row {
@@ -687,6 +730,20 @@
 		align-items: center;
 		gap: 6px;
 		padding: 6px 8px;
+	}
+
+	.dataset-info {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.dataset-title-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 	}
 
 	.dataset-name {
@@ -698,6 +755,36 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		min-width: 0;
+	}
+
+	.cached-check {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		background: #22c55e;
+		color: white;
+		border-radius: 50%;
+		font-size: 10px;
+		font-weight: bold;
+		flex-shrink: 0;
+	}
+
+	.dataset-meta {
+		display: flex;
+		gap: 4px;
+		flex-wrap: wrap;
+	}
+
+	.theme-badge {
+		background: rgba(59, 130, 246, 0.1);
+		color: #2563eb;
+	}
+
+	.geom-badge {
+		background: rgba(168, 85, 247, 0.1);
+		color: #7c3aed;
 	}
 
 	.dataset-actions {

@@ -12,6 +12,11 @@
 		cache_table: string | null;
 		access_url?: string;
 		updated_at?: string | null;
+		themes?: string[] | null;
+		bbox?: string | null;
+		source_srid?: number | null;
+		geometry_type?: string | null;
+		last_fetched_at?: string | null;
 	}
 
 	let datasets: Dataset[] = [];
@@ -99,9 +104,14 @@
 	{:else}
 		<div class="dataset-list">
 			{#each datasets as dataset}
-				<div class="dataset-card">
+				<div class="dataset-card" class:cached={dataset.is_cached}>
 					<div class="dataset-info">
-						<h4>{dataset.name}</h4>
+						<div class="title-row">
+							<h4>{dataset.name}</h4>
+							{#if dataset.is_cached}
+								<span class="cached-check" title="Cached and ready">✓</span>
+							{/if}
+						</div>
 						{#if dataset.description}
 							<p class="description">{dataset.description}</p>
 						{/if}
@@ -109,12 +119,29 @@
 							{#if dataset.feature_count}
 								<span class="badge">{dataset.feature_count.toLocaleString()} features</span>
 							{/if}
+							{#if dataset.themes && dataset.themes.length > 0}
+								{#each dataset.themes.slice(0, 2) as theme}
+									<span class="badge theme">{theme.replace(/_/g, ' ')}</span>
+								{/each}
+							{/if}
+							{#if dataset.geometry_type}
+								<span class="badge geom-type">{dataset.geometry_type}</span>
+							{/if}
 							<div class="info-tooltip">
 								<button class="info-btn" aria-label="More info">i</button>
 								<div class="tooltip-content">
 									<div><strong>URL:</strong> <a href="{dataset.access_url}" target="_blank" rel="noopener noreferrer">{dataset.access_url}</a></div>
 									<div><strong>Updated:</strong> {dataset.updated_at ? new Date(dataset.updated_at).toLocaleString() : 'N/A'}</div>
+									{#if dataset.last_fetched_at}
+										<div><strong>Last Fetched:</strong> {new Date(dataset.last_fetched_at).toLocaleString()}</div>
+									{/if}
 									<div><strong>Features:</strong> {dataset.feature_count ?? 'N/A'}</div>
+									{#if dataset.source_srid}
+										<div><strong>Source SRID:</strong> {dataset.source_srid}</div>
+									{/if}
+									{#if dataset.bbox}
+										<div><strong>Bbox:</strong> <span class="bbox-text">{dataset.bbox.substring(0, 50)}...</span></div>
+									{/if}
 								</div>
 							</div>
 							{#if !dataset.is_active}
@@ -199,7 +226,12 @@
 		display: flex;
 		gap: 12px;
 		align-items: flex-start;
-		transition: box-shadow 0.2s;
+		transition: all 0.2s;
+	}
+
+	.dataset-card.cached {
+		background: rgba(34, 197, 94, 0.05);
+		border-color: rgba(34, 197, 94, 0.2);
 	}
 
 	.dataset-card:hover {
@@ -211,10 +243,30 @@
 		min-width: 0;
 	}
 
+	.title-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 4px;
+	}
+
 	h4 {
-		margin: 0 0 4px 0;
+		margin: 0;
 		font-size: 16px;
 		font-weight: 600;
+	}
+
+	.cached-check {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 20px;
+		height: 20px;
+		background: #22c55e;
+		color: white;
+		border-radius: 50%;
+		font-size: 12px;
+		font-weight: bold;
 	}
 
 	.description {
@@ -277,11 +329,28 @@
 		border-radius: 4px;
 		font-size: 11px;
 		font-weight: 500;
+		text-transform: capitalize;
 	}
 
 	.badge.inactive {
 		background: #fee;
 		color: #dc2626;
+	}
+
+	.badge.theme {
+		background: rgba(59, 130, 246, 0.1);
+		color: #2563eb;
+	}
+
+	.badge.geom-type {
+		background: rgba(168, 85, 247, 0.1);
+		color: #7c3aed;
+	}
+
+	.bbox-text {
+		font-family: monospace;
+		font-size: 11px;
+		word-break: break-all;
 	}
 
 	.actions {
