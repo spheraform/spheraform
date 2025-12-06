@@ -18,7 +18,7 @@
 		docsOpen = false;
 	}
 
-	function showInfo(msg: string) {
+	async function showInfo(msg: string) {
 		infoMessage = msg;
 		showInfoModal = true;
 		// close menus for clarity
@@ -30,6 +30,7 @@
 		showInfoModal = false;
 		infoMessage = '';
 	}
+
 </script>
 
 <div class="top-right">
@@ -43,8 +44,8 @@
 		{#if docsOpen}
 			<div class="dropdown">
 				<a href="https://github.com/spheraform/spheraform" target="_blank">GitHub</a>
-				<a href="#" on:click|preventDefault={() => showInfo('API Docs')}>API Docs</a>
-				<a href="#" on:click|preventDefault={() => showInfo('About')}>About</a>
+				<a href="/docs/api">API Docs</a>
+				<a href="/docs/about">About</a>
 			</div>
 		{/if}
 	</div>
