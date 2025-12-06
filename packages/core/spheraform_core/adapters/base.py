@@ -59,6 +59,13 @@ class DatasetMetadata:
     attribution: Optional[str] = None
     source_metadata: Optional[dict] = None  # Raw metadata from source
 
+    # Enriched metadata fields
+    service_item_id: Optional[str] = None  # True unique identifier (e.g., ArcGIS serviceItemId)
+    geometry_type: Optional[str] = None  # Point, LineString, Polygon, etc.
+    source_srid: Optional[int] = None  # Source coordinate system (EPSG/WKID)
+    last_edit_date: Optional[datetime] = None  # Last edit date from source
+    themes: Optional[list[str]] = None  # Classified themes
+
 
 @dataclass
 class ChangeCheckInfo:

@@ -74,6 +74,23 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
     )
     access_url: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # Enriched metadata
+    service_item_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )  # True unique identifier for ArcGIS datasets
+    geometry_type: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, index=True
+    )  # Point, LineString, Polygon, etc.
+    source_srid: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # Source coordinate system (EPSG/WKID)
+    last_edit_date: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True
+    )  # Last edit date from source
+    last_fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True
+    )  # When dataset was last fetched/cached (distinct from crawl)
+
     # Change Detection
     cached_etag: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     cached_last_modified: Mapped[Optional[datetime]] = mapped_column(nullable=True)

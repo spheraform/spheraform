@@ -17,6 +17,7 @@ from .base import (
     DownloadResult,
 )
 from ..proxy import proxy_manager
+from .theme_classifier import ThemeClassifier
 
 logger = logging.getLogger("gunicorn.error")
 
@@ -236,6 +237,9 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             logger.info(f"Service info keys: {list(service_info.keys())}")
             logger.info(f"Service has {len(service_info.get('layers', []))} layers")
 
+            # Extract serviceItemId from service info (this is the true unique identifier)
+            service_item_id = service_info.get("serviceItemId")
+
             # Process each layer in the service
             for layer in service_info.get("layers", []):
                 layer_id = layer.get("id")
@@ -246,14 +250,43 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 layer_url = f"{service_url}/{layer_id}"
                 layer_info = await self._request(layer_url)
 
+                # Get accurate feature count using returnCountOnly query
+                feature_count = await self._get_feature_count(layer_url)
+
                 # Extract metadata
-                metadata = self._extract_metadata(layer_info, layer_url, map_name)
+                metadata = self._extract_metadata(
+                    layer_info,
+                    layer_url,
+                    map_name,
+                    service_item_id=service_item_id,
+                    feature_count=feature_count
+                )
                 yield metadata
 
         except Exception as e:
             logger.exception(f"Error processing service {service_name}: {e}")
 
-    def _extract_metadata(self, layer_info: dict, layer_url: str, map_name: str = None) -> DatasetMetadata:
+    async def _get_feature_count(self, layer_url: str) -> Optional[int]:
+        """Get accurate feature count using returnCountOnly query."""
+        try:
+            query_url = f"{layer_url}/query"
+            result = await self._request(query_url, params={
+                "where": "1=1",
+                "returnCountOnly": "true"
+            })
+            return result.get("count")
+        except Exception as e:
+            logger.warning(f"Could not get feature count for {layer_url}: {e}")
+            return None
+
+    def _extract_metadata(
+        self,
+        layer_info: dict,
+        layer_url: str,
+        map_name: str = None,
+        service_item_id: Optional[str] = None,
+        feature_count: Optional[int] = None
+    ) -> DatasetMetadata:
         """Extract metadata from ArcGIS layer info."""
         # Parse extent to bbox
         bbox = None
@@ -266,10 +299,18 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 extent.get("ymax"),
             )
 
-        # Get feature count if available
-        feature_count = None
-        # Note: ArcGIS doesn't always provide count in layer info
-        # We'd need to query with returnCountOnly=true
+        # Extract geometry type
+        geometry_type = layer_info.get("geometryType")
+        # Convert ArcGIS geometry type to standard format
+        # e.g., "esriGeometryPoint" -> "Point"
+        if geometry_type:
+            geometry_type = geometry_type.replace("esriGeometry", "")
+
+        # Extract source SRID/WKID
+        source_srid = None
+        if "extent" in layer_info and "spatialReference" in layer_info["extent"]:
+            spatial_ref = layer_info["extent"]["spatialReference"]
+            source_srid = spatial_ref.get("wkid") or spatial_ref.get("latestWkid")
 
         # Extract keywords from description/tags
         keywords = []
@@ -285,6 +326,12 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         else:
             dataset_name = layer_name
 
+        # Classify themes based on name and description
+        themes = ThemeClassifier.classify(
+            dataset_name,
+            layer_info.get("description")
+        )
+
         return DatasetMetadata(
             external_id=str(layer_info.get("id")),
             name=dataset_name,
@@ -298,6 +345,12 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             license=None,  # ArcGIS doesn't standardize this
             attribution=layer_info.get("copyrightText"),
             source_metadata=layer_info,
+            # Enriched metadata
+            service_item_id=service_item_id,
+            geometry_type=geometry_type,
+            source_srid=source_srid,
+            last_edit_date=self._parse_edit_date(layer_info),
+            themes=themes,
         )
 
     def _parse_edit_date(self, layer_info: dict) -> Optional[datetime]:
