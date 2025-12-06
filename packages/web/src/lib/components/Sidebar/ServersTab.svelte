@@ -184,30 +184,109 @@
 			servers = [...servers];
 		}
 
-		async function downloadDataset(dataset: any, e?: Event) {
+		async function fetchOrShowDataset(dataset: any, e?: Event) {
 			e && e.stopPropagation();
 			try {
 				if (dataset.is_cached) {
-					const res = await fetch(`/api/v1/download?dataset_ids=${dataset.id}&format=geojson`);
-					if (!res.ok) throw new Error('Failed to download file');
-					const blob = await res.blob();
-					const url = window.URL.createObjectURL(blob);
-					const a = document.createElement('a'); a.href = url; a.download = `${dataset.name || 'dataset'}.geojson`; document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url);
-				} else {
-					// start download/cache job
-					const res = await fetch('/api/v1/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_ids: [dataset.id], format: 'geojson' }) });
-					if (!res.ok) throw new Error('Failed to start download job');
-					const data = await res.json();
-					if (data.download_url) {
-						// immediate download available
-						window.location.href = data.download_url;
-					} else {
-						infoMessage = 'Download started. When caching completes, you can download the GeoJSON from cache.';
-						showInfoModal = true;
+					// Load and display on map
+					console.log(`Loading cached dataset ${dataset.id}...`);
+					const res = await fetch(`/api/v1/download/${dataset.id}/file`);
+					if (!res.ok) {
+						const errorText = await res.text();
+						console.error('Failed to load cached dataset:', errorText);
+						throw new Error(`Failed to load (${res.status}): ${errorText}`);
 					}
+					const geojson = await res.json();
+
+					// TODO: Dispatch event or call function to show on map
+					// For now, just show a message
+					infoMessage = `Loaded ${dataset.name} on map (${geojson.features?.length || 0} features)`;
+					showInfoModal = true;
+
+					console.log('GeoJSON loaded:', geojson);
+				} else {
+					// Start fetch & cache job
+					console.log(`Starting fetch job for dataset ${dataset.id}...`);
+					infoMessage = `Fetching and caching ${dataset.name}... This may take a while.`;
+					showInfoModal = true;
+
+					const res = await fetch('/api/v1/download', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ dataset_ids: [dataset.id], format: 'geojson' })
+					});
+
+					if (!res.ok) {
+						const errorText = await res.text();
+						console.error('Failed to start fetch job:', errorText);
+						throw new Error(`Failed to start fetch (${res.status}): ${errorText}`);
+					}
+
+					const data = await res.json();
+					console.log('Download job response:', data);
+
+					if (data.job_id) {
+						// Job was created, need to poll for completion
+						infoMessage = `Download job started for ${dataset.name}. Job ID: ${data.job_id}. Note: Background worker may not be running yet.`;
+					} else if (data.download_url) {
+						// Direct download URL returned
+						infoMessage = `${dataset.name} is ready. Download URL: ${data.download_url}`;
+						// Try to fetch it immediately
+						const downloadRes = await fetch(data.download_url);
+						if (downloadRes.ok) {
+							const geojson = await downloadRes.json();
+							console.log('Downloaded GeoJSON:', geojson);
+							infoMessage = `Loaded ${dataset.name} (${geojson.features?.length || 0} features)`;
+						}
+					}
+					showInfoModal = true;
 				}
 			} catch (err) {
-				infoMessage = 'Error downloading dataset: ' + (err instanceof Error ? err.message : String(err)); showInfoModal = true;
+				console.error('Error in fetchOrShowDataset:', err);
+				infoMessage = 'Error: ' + (err instanceof Error ? err.message : String(err));
+				showInfoModal = true;
+			}
+		}
+
+		async function downloadDatasetFile(dataset: any, e?: Event) {
+			e && e.stopPropagation();
+			try {
+				if (!dataset.is_cached) {
+					infoMessage = 'Please fetch and cache the dataset first using the play button.';
+					showInfoModal = true;
+					return;
+				}
+
+				console.log(`Downloading dataset file ${dataset.id}...`);
+				const res = await fetch(`/api/v1/download/${dataset.id}/file`);
+				if (!res.ok) {
+					const errorText = await res.text();
+					console.error('Download failed:', errorText);
+					throw new Error(`Failed to download (${res.status}): ${errorText}`);
+				}
+
+				// Check content type to ensure we got the file
+				const contentType = res.headers.get('content-type');
+				console.log('Downloaded file content-type:', contentType);
+
+				const blob = await res.blob();
+				console.log('Downloaded blob size:', blob.size, 'bytes');
+
+				const url = window.URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = `${dataset.name || 'dataset'}.geojson`;
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+				window.URL.revokeObjectURL(url);
+
+				infoMessage = `Downloaded ${dataset.name} (${(blob.size / 1024).toFixed(2)} KB)`;
+				showInfoModal = true;
+			} catch (err) {
+				console.error('Error in downloadDatasetFile:', err);
+				infoMessage = 'Error downloading file: ' + (err instanceof Error ? err.message : String(err));
+				showInfoModal = true;
 			}
 		}
 
@@ -381,11 +460,20 @@
 															<line x1="12" y1="8" x2="12.01" y2="8"></line>
 														</svg>
 													</button>
-													<button class="icon-btn play-btn" on:click|stopPropagation={(e) => downloadDataset(dataset, e)} title={dataset.is_cached ? 'Download' : 'Fetch & Cache'}>
+													<button class="icon-btn play-btn" on:click|stopPropagation={(e) => fetchOrShowDataset(dataset, e)} title={dataset.is_cached ? 'Show on Map' : 'Fetch & Cache'}>
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 															<polygon points="5 3 19 12 5 21 5 3"></polygon>
 														</svg>
 													</button>
+													{#if dataset.is_cached}
+														<button class="icon-btn download-btn" on:click|stopPropagation={(e) => downloadDatasetFile(dataset, e)} title="Download File">
+															<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+																<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+																<polyline points="7 10 12 15 17 10"></polyline>
+																<line x1="12" y1="15" x2="12" y2="3"></line>
+															</svg>
+														</button>
+													{/if}
 												</div>
 											</div>
 										</div>
