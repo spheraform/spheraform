@@ -13,7 +13,7 @@ from sqlalchemy import (
     Index,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, deferred
 from geoalchemy2 import Geometry
 import enum
 
@@ -59,8 +59,10 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
     # Themes: hydro, transport, admin, boundaries, elevation, imagery, etc.
 
     # Spatial extent (for spatial search)
+    # Deferred loading to avoid loading large geometry data by default
     bbox: Mapped[Optional[str]] = mapped_column(
         Geometry(geometry_type="POLYGON", srid=4326),
+        deferred=True,
         nullable=True,
     )
 
@@ -71,6 +73,23 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
         ArrayOfText(), nullable=True
     )
     access_url: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Enriched metadata
+    service_item_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )  # True unique identifier for ArcGIS datasets
+    geometry_type: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, index=True
+    )  # Point, LineString, Polygon, etc.
+    source_srid: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # Source coordinate system (EPSG/WKID)
+    last_edit_date: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True
+    )  # Last edit date from source
+    last_fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True
+    )  # When dataset was last fetched/cached (distinct from crawl)
 
     # Change Detection
     cached_etag: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

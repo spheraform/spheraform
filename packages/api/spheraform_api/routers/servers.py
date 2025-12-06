@@ -1,10 +1,11 @@
 """Server management endpoints."""
-
+import logging
 from typing import List
 from uuid import UUID
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from ..dependencies import get_db
 from ..schemas import ServerCreate, ServerUpdate, ServerResponse
@@ -12,6 +13,7 @@ from spheraform_core.models import Geoserver, HealthStatus, Dataset, ProviderTyp
 from spheraform_core.adapters import ArcGISAdapter
 
 router = APIRouter()
+logger = logging.getLogger("gunicorn.error")
 
 
 @router.post("", response_model=ServerResponse, status_code=status.HTTP_201_CREATED)
@@ -142,21 +144,26 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
         ) as adapter:
             # Discover datasets
             async for dataset_meta in adapter.discover_datasets():
-                # Check if dataset already exists
+                # Check if dataset already exists (using access_url as unique identifier)
                 existing = (
                     db.query(Dataset)
                     .filter(
                         Dataset.geoserver_id == server.id,
-                        Dataset.external_id == dataset_meta.external_id,
+                        Dataset.access_url == dataset_meta.access_url,
                     )
                     .first()
                 )
 
-                # Convert bbox tuple to WKT POLYGON for PostGIS
-                bbox_wkt = None
-                if dataset_meta.bbox:
+                # Convert bbox tuple to WKT POLYGON and transform to EPSG:4326
+                bbox_geometry = None
+                if dataset_meta.bbox and dataset_meta.source_srid:
                     minx, miny, maxx, maxy = dataset_meta.bbox
                     bbox_wkt = f"POLYGON(({minx} {miny},{maxx} {miny},{maxx} {maxy},{minx} {maxy},{minx} {miny}))"
+                    # Transform from source SRID to EPSG:4326 using PostGIS
+                    bbox_geometry = func.ST_Transform(
+                        func.ST_GeomFromText(bbox_wkt, dataset_meta.source_srid),
+                        4326
+                    )
 
                 if existing:
                     # Update existing dataset
@@ -164,9 +171,15 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
                     existing.description = dataset_meta.description
                     existing.access_url = dataset_meta.access_url
                     existing.feature_count = dataset_meta.feature_count
-                    existing.bbox = bbox_wkt
+                    existing.bbox = bbox_geometry
                     existing.keywords = dataset_meta.keywords
                     existing.updated_at = datetime.utcnow()
+                    # Update enriched metadata
+                    existing.service_item_id = dataset_meta.service_item_id
+                    existing.geometry_type = dataset_meta.geometry_type
+                    existing.source_srid = dataset_meta.source_srid
+                    existing.last_edit_date = dataset_meta.last_edit_date
+                    existing.themes = dataset_meta.themes
                     datasets_updated += 1
                 else:
                     # Create new dataset
@@ -177,9 +190,15 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
                         description=dataset_meta.description,
                         access_url=dataset_meta.access_url,
                         feature_count=dataset_meta.feature_count,
-                        bbox=bbox_wkt,
+                        bbox=bbox_geometry,
                         keywords=dataset_meta.keywords,
                         is_active=True,
+                        # Enriched metadata
+                        service_item_id=dataset_meta.service_item_id,
+                        geometry_type=dataset_meta.geometry_type,
+                        source_srid=dataset_meta.source_srid,
+                        last_edit_date=dataset_meta.last_edit_date,
+                        themes=dataset_meta.themes,
                     )
                     db.add(new_dataset)
                     datasets_new += 1

@@ -80,8 +80,8 @@ services:
   # Spheraform API
   api:
     build:
-      context: ./packages/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/api/Dockerfile
     container_name: spheraform-api
     depends_on:
       postgres:
@@ -101,6 +101,21 @@ services:
     volumes:
       - ./packages/api:/app/api
       - ./packages/core:/app/core
+    restart: unless-stopped
+
+  # Spheraform Web Interface
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    container_name: spheraform-web
+    depends_on:
+      - api
+    environment:
+      API_URL: http://api:8000
+      ORIGIN: http://localhost:5173
+    ports:
+      - "5173:3000"
     restart: unless-stopped
 
   # TiTiler - Commented out due to no ARM64 support

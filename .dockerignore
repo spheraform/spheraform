@@ -1,0 +1,62 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+npm-debug.log*
+.npm
+
+# SvelteKit
+.svelte-kit/
+packages/web/build/
+
+# Old/deprecated directories
+web/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Documentation
+*.md
+!packages/*/README.md
+docs/
+
+# Tests
+tests/
+*.test.js
+*.spec.js
+
+# Misc
+*.log
+.cache/

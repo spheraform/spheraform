@@ -1,9 +1,10 @@
 """Pydantic schemas for API request/response models."""
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from geoalchemy2.shape import to_shape
 
 from spheraform_core.models import ProviderType, HealthStatus, DownloadStrategy
 
@@ -74,12 +75,14 @@ class DatasetResponse(BaseModel):
     description: Optional[str]
     keywords: Optional[List[str]]
     themes: Optional[List[str]]
+    bbox: Optional[str] = None  # WKT POLYGON geometry
     feature_count: Optional[int]
     updated_date: Optional[datetime]
     download_formats: Optional[List[str]]
     access_url: str
     is_cached: bool
     cached_at: Optional[datetime]
+    cache_table: Optional[str]
     download_strategy: DownloadStrategy
     quality_score: Optional[int]
     license: Optional[str]
@@ -87,6 +90,27 @@ class DatasetResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    # Enriched metadata
+    service_item_id: Optional[str] = None
+    geometry_type: Optional[str] = None
+    source_srid: Optional[int] = None
+    last_edit_date: Optional[datetime] = None
+    last_fetched_at: Optional[datetime] = None
+
+    @field_validator('bbox', mode='before')
+    @classmethod
+    def convert_bbox_to_wkt(cls, value: Any) -> Optional[str]:
+        """Convert bbox WKBElement to WKT string before validation."""
+        if value is None:
+            return None
+        try:
+            # Convert GeoAlchemy2 WKBElement to Shapely geometry, then to WKT
+            shape = to_shape(value)
+            return shape.wkt
+        except Exception:
+            # If conversion fails, return None
+            return None
 
     class Config:
         from_attributes = True
