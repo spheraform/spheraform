@@ -419,15 +419,15 @@
 							</button>
 						</div>
 						<div class="server-actions">
+							<button class="icon-btn crawl-btn" on:click|stopPropagation={() => crawlServer(server.id)} disabled={server.crawling} title={server.crawling ? 'Crawling...' : 'Crawl'}>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<polygon points="5 3 19 12 5 21 5 3"></polygon>
+								</svg>
+							</button>
 							<button class="icon-btn edit-btn" on:click|stopPropagation={() => openEdit(server)} title="Edit">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
 									<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-								</svg>
-							</button>
-							<button class="icon-btn crawl-btn" on:click|stopPropagation={() => crawlServer(server.id)} disabled={server.crawling} title={server.crawling ? 'Crawling...' : 'Crawl'}>
-								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<polygon points="5 3 19 12 5 21 5 3"></polygon>
 								</svg>
 							</button>
 							<button class="icon-btn delete-btn" on:click|stopPropagation={() => confirmDelete(server)} title="Delete">

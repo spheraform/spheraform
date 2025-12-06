@@ -80,6 +80,7 @@ class DatasetResponse(BaseModel):
     access_url: str
     is_cached: bool
     cached_at: Optional[datetime]
+    cache_table: Optional[str]
     download_strategy: DownloadStrategy
     quality_score: Optional[int]
     license: Optional[str]

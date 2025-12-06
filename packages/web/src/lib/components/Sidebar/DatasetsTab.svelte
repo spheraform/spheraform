@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { mapStore } from '$lib/stores/mapStore';
 
 	interface Dataset {
 		id: string;
@@ -7,6 +8,8 @@
 		description: string | null;
 		feature_count: number | null;
 		is_active: boolean;
+		is_cached: boolean;
+		cache_table: string | null;
 		access_url?: string;
 		updated_at?: string | null;
 	}
@@ -43,6 +46,40 @@
 			document.body.removeChild(a);
 		} catch (e) {
 			alert('Error downloading dataset: ' + (e instanceof Error ? e.message : 'Unknown error'));
+		}
+	}
+
+	async function viewOnMap(dataset: Dataset) {
+		if (!dataset.cache_table) {
+			// Dataset not cached yet, trigger download first
+			try {
+				const response = await fetch('/api/v1/download', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						dataset_ids: [dataset.id],
+						format: 'geojson',
+						merge: false
+					})
+				});
+
+				if (!response.ok) throw new Error('Failed to cache dataset');
+
+				const result = await response.json();
+
+				// Refresh datasets to get cache_table
+				const refreshResponse = await fetch('/api/v1/datasets?limit=50');
+				datasets = await refreshResponse.json();
+
+				const updatedDataset = datasets.find(d => d.id === dataset.id);
+				if (updatedDataset?.cache_table) {
+					mapStore.addLayer(updatedDataset.id, updatedDataset.cache_table);
+				}
+			} catch (e) {
+				alert('Error caching dataset: ' + (e instanceof Error ? e.message : 'Unknown error'));
+			}
+		} else {
+			mapStore.addLayer(dataset.id, dataset.cache_table);
 		}
 	}
 </script>
@@ -85,13 +122,26 @@
 							{/if}
 						</div>
 					</div>
-					<button class="download-btn" on:click={() => downloadDataset(dataset.id)}>
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-							<polyline points="7 10 12 15 17 10"></polyline>
-							<line x1="12" y1="15" x2="12" y2="3"></line>
-						</svg>
-					</button>
+					<div class="actions">
+						<button
+							class="map-btn"
+							on:click={() => viewOnMap(dataset)}
+							title={dataset.is_cached ? "View on map" : "Cache and view on map"}
+						>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"></path>
+								<line x1="8" y1="2" x2="8" y2="18"></line>
+								<line x1="16" y1="6" x2="16" y2="22"></line>
+							</svg>
+						</button>
+						<button class="download-btn" on:click={() => downloadDataset(dataset.id)}>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+								<polyline points="7 10 12 15 17 10"></polyline>
+								<line x1="12" y1="15" x2="12" y2="3"></line>
+							</svg>
+						</button>
+					</div>
 				</div>
 			{/each}
 		</div>
@@ -234,6 +284,12 @@
 		color: #dc2626;
 	}
 
+	.actions {
+		display: flex;
+		gap: 8px;
+	}
+
+	.map-btn,
 	.download-btn {
 		width: 36px;
 		height: 36px;
@@ -248,7 +304,17 @@
 		transition: all 0.2s;
 	}
 
+	.map-btn:hover,
 	.download-btn:hover {
 		background: rgba(0, 0, 0, 0.05);
+	}
+
+	.map-btn {
+		color: #3b82f6;
+		border-color: #3b82f6;
+	}
+
+	.map-btn:hover {
+		background: rgba(59, 130, 246, 0.1);
 	}
 </style>
