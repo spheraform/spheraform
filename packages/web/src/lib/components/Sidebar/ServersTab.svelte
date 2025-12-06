@@ -3,6 +3,7 @@
 	import ServerForm from '$lib/components/Modals/ServerForm.svelte';
 	import ConfirmModal from '$lib/components/Modals/ConfirmModal.svelte';
 	import InfoModal from '$lib/components/Modals/InfoModal.svelte';
+	import InfoDetailModal from '$lib/components/Modals/InfoDetailModal.svelte';
 
 	interface Server {
 		id: string;
@@ -11,6 +12,7 @@
 		provider_type: string;
 		country: string;
 		is_active: boolean;
+		health_status: string | null;
 		last_crawled_at: string | null;
 		// UI state
 		expanded?: boolean;
@@ -19,9 +21,39 @@
 		datasets?: any[];
 	}
 
+	export let sidebarWidth: number = 400;
+
 	let servers: Server[] = [];
 	let loading = true;
 	let error: string | null = null;
+
+	// Filtering and sorting state
+	let filterCountry = '';
+	let filterServerType = '';
+	let filterHealthStatus = '';
+	let sortBy: 'name' | 'country' | '' = '';
+	let sortAscending = true;
+
+	// Grid view: activate when sidebar is wider than 600px
+	$: useGridView = sidebarWidth > 600;
+
+	// Get unique values for filter dropdowns
+	$: countries = [...new Set(servers.map(s => s.country).filter(Boolean))].sort();
+	$: serverTypes = [...new Set(servers.map(s => s.provider_type).filter(Boolean))].sort();
+	$: healthStatuses = [...new Set(servers.map(s => s.health_status).filter(Boolean))].sort();
+
+	// Filtered and sorted servers
+	$: filteredServers = servers
+		.filter(s => !filterCountry || s.country === filterCountry)
+		.filter(s => !filterServerType || s.provider_type === filterServerType)
+		.filter(s => !filterHealthStatus || s.health_status === filterHealthStatus)
+		.sort((a, b) => {
+			if (!sortBy) return 0;
+			const aVal = a[sortBy] || '';
+			const bVal = b[sortBy] || '';
+			const comparison = aVal.localeCompare(bVal);
+			return sortAscending ? comparison : -comparison;
+		});
 
 	// Modal state
 	let showAddModal = false;
@@ -34,6 +66,11 @@
 
 	let showInfoModal = false;
 	let infoMessage = '';
+
+	// Detail modal state
+	let showDetailModal = false;
+	let detailModalTitle = '';
+	let detailModalRows: Array<{ label: string; value: string; link?: boolean }> = [];
 
 	onMount(async () => {
 		try {
@@ -186,6 +223,40 @@
 		}
 	}
 
+	function showServerDetails(server: Server) {
+		detailModalTitle = `Server: ${server.name}`;
+		detailModalRows = [
+			{ label: 'Type', value: server.provider_type },
+			{ label: 'Country', value: server.country || 'N/A' },
+			{ label: 'URL', value: server.base_url, link: true },
+			{ label: 'Datasets', value: String(server.datasets?.length || 0) },
+			{ label: 'Status', value: server.health_status || 'Unknown' },
+			{ label: 'Last Crawl', value: server.last_crawled_at ? new Date(server.last_crawled_at).toLocaleString() : 'Never' }
+		];
+		showDetailModal = true;
+	}
+
+	function showDatasetDetails(dataset: any) {
+		detailModalTitle = `Dataset: ${dataset.name}`;
+		detailModalRows = [];
+
+		if (dataset.access_url) {
+			detailModalRows.push({ label: 'Access URL', value: dataset.access_url, link: true });
+		}
+		if (dataset.url) {
+			detailModalRows.push({ label: 'URL', value: dataset.url, link: true });
+		}
+		detailModalRows.push(
+			{ label: 'Extent', value: formatExtent(dataset.extent) },
+			{ label: 'Features', value: dataset.feature_count?.toLocaleString() || 'N/A' }
+		);
+		if (dataset.keywords && dataset.keywords.length > 0) {
+			detailModalRows.push({ label: 'Keywords', value: dataset.keywords.join(', ') });
+		}
+
+		showDetailModal = true;
+	}
+
 </script>
 
 <div class="servers-tab">
@@ -200,11 +271,52 @@
 		</button>
 	</div>
 
+	<!-- Filters and Sorting -->
+	<div class="filters">
+		<select bind:value={filterCountry} class="filter-select">
+			<option value="">All Countries</option>
+			{#each countries as country}
+				<option value={country}>{country}</option>
+			{/each}
+		</select>
+		<select bind:value={filterServerType} class="filter-select">
+			<option value="">All Types</option>
+			{#each serverTypes as type}
+				<option value={type}>{type}</option>
+			{/each}
+		</select>
+		<select bind:value={filterHealthStatus} class="filter-select">
+			<option value="">All Status</option>
+			{#each healthStatuses as status}
+				<option value={status}>{status}</option>
+			{/each}
+		</select>
+		<select bind:value={sortBy} class="filter-select">
+			<option value="">No Sort</option>
+			<option value="name">Sort by Name</option>
+			<option value="country">Sort by Country</option>
+		</select>
+		{#if sortBy}
+			<button class="sort-direction-btn" on:click={() => sortAscending = !sortAscending} title={sortAscending ? 'Ascending' : 'Descending'}>
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					{#if sortAscending}
+						<line x1="12" y1="19" x2="12" y2="5"></line>
+						<polyline points="5 12 12 5 19 12"></polyline>
+					{:else}
+						<line x1="12" y1="5" x2="12" y2="19"></line>
+						<polyline points="5 12 12 19 19 12"></polyline>
+					{/if}
+				</svg>
+			</button>
+		{/if}
+	</div>
+
 	<!-- Modals -->
 	<ServerForm open={showAddModal} mode="add" on:save={handleAddSave} on:close={() => showAddModal = false} />
 	<ServerForm open={showEditModal} initial={editInitial} mode="edit" on:save={handleEditSave} on:close={() => { showEditModal = false; serverBeingEdited = null; }} />
 	<ConfirmModal open={showConfirmDelete} title="Delete Server" message={serverToDelete ? `Delete server "${serverToDelete.name}"? This will remove its datasets from the catalogue.` : ''} on:confirm={handleDeleteConfirm} on:close={() => { showConfirmDelete = false; serverToDelete = null; }} />
 	<InfoModal open={showInfoModal} message={infoMessage} on:close={() => showInfoModal = false} />
+	<InfoDetailModal open={showDetailModal} title={detailModalTitle} rows={detailModalRows} on:close={() => showDetailModal = false} />
 
 	{#if loading}
 		<div class="loading">Loading servers...</div>
@@ -213,32 +325,18 @@
 	{:else if servers.length === 0}
 		<div class="empty">No servers configured. Click "Add Server" to get started.</div>
 	{:else}
-		<div class="server-list">
-			{#each servers as server}
+		<div class="server-list" class:grid-view={useGridView}>
+			{#each filteredServers as server}
 				<div class="server-card" class:expanded={server.expanded} on:click={() => toggleServer(server)}>
 					<div class="server-header">
 						<div class="server-info">
 							<h4>{server.name}</h4>
-							<button class="icon-btn server-info-btn" on:click|stopPropagation title="Info">
+							<button class="icon-btn server-info-btn" on:click|stopPropagation={() => showServerDetails(server)} title="View Details">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<circle cx="12" cy="12" r="10"></circle>
 									<line x1="12" y1="16" x2="12" y2="12"></line>
 									<line x1="12" y1="8" x2="12.01" y2="8"></line>
 								</svg>
-								<div class="server-tooltip">
-									<div class="tooltip-row"><strong>Type:</strong> {server.provider_type}</div>
-									{#if server.country}
-										<div class="tooltip-row"><strong>Country:</strong> {server.country}</div>
-									{/if}
-									<div class="tooltip-row"><strong>URL:</strong> {server.base_url}</div>
-									<div class="tooltip-row"><strong>Datasets:</strong> {server.datasets?.length || 0}</div>
-									<div class="tooltip-row"><strong>Status:</strong> {server.is_active ? 'Active' : 'Inactive'}</div>
-									{#if server.last_crawled_at}
-										<div class="tooltip-row"><strong>Last Crawl:</strong> {new Date(server.last_crawled_at).toLocaleString()}</div>
-									{:else}
-										<div class="tooltip-row"><strong>Last Crawl:</strong> Never</div>
-									{/if}
-								</div>
 							</button>
 						</div>
 						<div class="server-actions">
@@ -276,20 +374,12 @@
 													<span class="badge feature-badge">{dataset.feature_count.toLocaleString()}</span>
 												{/if}
 												<div class="dataset-actions">
-													<button class="icon-btn info-btn" on:click|stopPropagation title="Info">
+													<button class="icon-btn info-btn" on:click|stopPropagation={() => showDatasetDetails(dataset)} title="View Details">
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 															<circle cx="12" cy="12" r="10"></circle>
 															<line x1="12" y1="16" x2="12" y2="12"></line>
 															<line x1="12" y1="8" x2="12.01" y2="8"></line>
 														</svg>
-														<div class="tooltip">
-															<div class="tooltip-row"><strong>URL:</strong> {dataset.url || 'N/A'}</div>
-															<div class="tooltip-row"><strong>Extent:</strong> {formatExtent(dataset.extent)}</div>
-															<div class="tooltip-row"><strong>Features:</strong> {dataset.feature_count?.toLocaleString() || 'N/A'}</div>
-															{#if dataset.keywords && dataset.keywords.length > 0}
-																<div class="tooltip-row"><strong>Keywords:</strong> {dataset.keywords.join(', ')}</div>
-															{/if}
-														</div>
 													</button>
 													<button class="icon-btn play-btn" on:click|stopPropagation={(e) => downloadDataset(dataset, e)} title={dataset.is_cached ? 'Download' : 'Fetch & Cache'}>
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -413,31 +503,6 @@
 		text-overflow: ellipsis;
 	}
 
-	.server-info-btn {
-		position: relative;
-	}
-
-	.server-tooltip {
-		display: none;
-		position: absolute;
-		left: 0;
-		top: 100%;
-		margin-top: 4px;
-		background: rgba(0, 0, 0, 0.9);
-		color: white;
-		padding: 8px;
-		border-radius: 6px;
-		font-size: 11px;
-		min-width: 250px;
-		max-width: 300px;
-		z-index: 1000;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-		white-space: normal;
-	}
-
-	.server-info-btn:hover .server-tooltip {
-		display: block;
-	}
 
 	.badge {
 		padding: 2px 6px;
@@ -553,45 +618,66 @@
 		flex-shrink: 0;
 	}
 
-	.info-btn {
-		position: relative;
+
+	/* Filters and Sorting */
+	.filters {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-bottom: 16px;
+		padding: 0 0 12px 0;
+		border-bottom: 1px solid rgba(0, 0, 0, 0.1);
 	}
 
-	.info-btn .tooltip {
-		display: none;
-		position: absolute;
-		right: 0;
-		top: 100%;
-		margin-top: 4px;
-		background: rgba(0, 0, 0, 0.9);
-		color: white;
-		padding: 8px;
+	.filter-select {
+		flex: 1;
+		min-width: 120px;
+		padding: 6px 10px;
+		border: 1px solid rgba(0, 0, 0, 0.15);
 		border-radius: 6px;
-		font-size: 11px;
-		min-width: 250px;
-		max-width: 300px;
-		z-index: 1000;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-		white-space: normal;
+		background: white;
+		font-size: 12px;
+		color: var(--text-primary);
+		cursor: pointer;
+		transition: all 0.2s;
 	}
 
-	.info-btn:hover .tooltip {
-		display: block;
+	.filter-select:hover {
+		border-color: rgba(0, 0, 0, 0.25);
 	}
 
-	.tooltip-row {
-		margin-bottom: 6px;
-		line-height: 1.4;
-		word-break: break-word;
+	.filter-select:focus {
+		outline: none;
+		border-color: var(--text-primary);
 	}
 
-	.tooltip-row:last-child {
-		margin-bottom: 0;
+	.sort-direction-btn {
+		width: 32px;
+		height: 32px;
+		padding: 0;
+		border: 1px solid rgba(0, 0, 0, 0.15);
+		background: white;
+		border-radius: 6px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all 0.2s;
 	}
 
-	.tooltip-row strong {
-		color: #93c5fd;
-		font-weight: 600;
-		margin-right: 4px;
+	.sort-direction-btn:hover {
+		background: rgba(0, 0, 0, 0.05);
+		border-color: rgba(0, 0, 0, 0.25);
+	}
+
+	/* Grid View */
+	.server-list.grid-view {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+		gap: 12px;
+	}
+
+	.server-list.grid-view .server-card {
+		height: fit-content;
 	}
 </style>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
+	import { createEventDispatcher, onMount } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import ServersTab from './ServersTab.svelte';
 	import DatasetsTab from './DatasetsTab.svelte';
@@ -12,14 +12,49 @@
 	type Tab = 'servers' | 'datasets' | 'analytics';
 	let activeTab: Tab = 'servers';
 
+	// Sidebar width management
+	let sidebarWidth = 400;
+	let isResizing = false;
+
+	onMount(() => {
+		// Load saved width from localStorage
+		const saved = localStorage.getItem('sidebar-width');
+		if (saved) {
+			sidebarWidth = parseInt(saved, 10);
+		}
+	});
+
 	function close() {
 		dispatch('close');
 	}
+
+	function startResize() {
+		isResizing = true;
+	}
+
+	function stopResize() {
+		if (isResizing) {
+			isResizing = false;
+			// Save width to localStorage
+			localStorage.setItem('sidebar-width', sidebarWidth.toString());
+		}
+	}
+
+	function resize(event: MouseEvent) {
+		if (isResizing) {
+			// Calculate new width based on mouse position
+			const newWidth = event.clientX;
+			// Constrain width between 300px and 800px
+			sidebarWidth = Math.max(300, Math.min(800, newWidth));
+		}
+	}
 </script>
+
+<svelte:window on:mousemove={resize} on:mouseup={stopResize} />
 
 {#if open}
 	<div class="sidebar-overlay" on:click={close} transition:slide={{ duration: 200 }}></div>
-	<div class="sidebar" transition:slide={{ duration: 300, axis: 'x' }}>
+	<div class="sidebar" style="width: {sidebarWidth}px" transition:slide={{ duration: 300, axis: 'x' }}>
 		<div class="sidebar-header">
 			<img src="/logo.png" alt="Spheraform" class="logo" />
 			<button class="close-btn" on:click={close} aria-label="Close sidebar">
@@ -56,13 +91,21 @@
 
 		<div class="tab-content">
 			{#if activeTab === 'servers'}
-				<ServersTab />
+				<ServersTab {sidebarWidth} />
 			{:else if activeTab === 'datasets'}
 				<DatasetsTab />
 			{:else if activeTab === 'analytics'}
 				<AnalyticsTab />
 			{/if}
 		</div>
+
+		<div
+			class="resize-handle"
+			class:resizing={isResizing}
+			on:mousedown={startResize}
+			role="separator"
+			aria-label="Resize sidebar"
+		></div>
 	</div>
 {/if}
 
@@ -81,7 +124,6 @@
 		position: fixed;
 		top: 0;
 		left: 0;
-		width: 400px;
 		height: 100%;
 		background: rgba(255, 255, 255, 0.95);
 		backdrop-filter: blur(20px);
@@ -90,6 +132,23 @@
 		z-index: 2000;
 		display: flex;
 		flex-direction: column;
+	}
+
+	.resize-handle {
+		position: absolute;
+		top: 0;
+		right: 0;
+		width: 8px;
+		height: 100%;
+		cursor: ew-resize;
+		background: transparent;
+		transition: background 0.2s;
+		z-index: 10;
+	}
+
+	.resize-handle:hover,
+	.resize-handle.resizing {
+		background: rgba(0, 0, 0, 0.1);
 	}
 
 	.sidebar-header {
