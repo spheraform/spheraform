@@ -174,6 +174,18 @@
 			}
 		}
 
+	function formatExtent(extent: any): string {
+		if (!extent || !extent.coordinates) return 'N/A';
+		try {
+			const coords = extent.coordinates[0];
+			if (!coords || coords.length < 2) return 'N/A';
+			const [[minX, minY], [maxX, maxY]] = [coords[0], coords[2]];
+			return `[${minX.toFixed(2)}, ${minY.toFixed(2)}, ${maxX.toFixed(2)}, ${maxY.toFixed(2)}]`;
+		} catch {
+			return 'N/A';
+		}
+	}
+
 </script>
 
 <div class="servers-tab">
@@ -203,44 +215,89 @@
 	{:else}
 		<div class="server-list">
 			{#each servers as server}
-				<div class="server-card">
-					<div class="server-info">
-						<h4>{server.name}</h4>
-						<p class="url">{server.base_url}</p>
-						<div class="meta">
-							<span class="badge">{server.provider_type}</span>
-							{#if server.country}
-								<span class="badge">{server.country}</span>
-							{/if}
-							{#if !server.is_active}
-								<span class="badge inactive">Inactive</span>
-							{/if}
+				<div class="server-card" class:expanded={server.expanded} on:click={() => toggleServer(server)}>
+					<div class="server-header">
+						<div class="server-info">
+							<h4>{server.name}</h4>
+							<button class="icon-btn server-info-btn" on:click|stopPropagation title="Info">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<circle cx="12" cy="12" r="10"></circle>
+									<line x1="12" y1="16" x2="12" y2="12"></line>
+									<line x1="12" y1="8" x2="12.01" y2="8"></line>
+								</svg>
+								<div class="server-tooltip">
+									<div class="tooltip-row"><strong>Type:</strong> {server.provider_type}</div>
+									{#if server.country}
+										<div class="tooltip-row"><strong>Country:</strong> {server.country}</div>
+									{/if}
+									<div class="tooltip-row"><strong>URL:</strong> {server.base_url}</div>
+									<div class="tooltip-row"><strong>Datasets:</strong> {server.datasets?.length || 0}</div>
+									<div class="tooltip-row"><strong>Status:</strong> {server.is_active ? 'Active' : 'Inactive'}</div>
+									{#if server.last_crawled_at}
+										<div class="tooltip-row"><strong>Last Crawl:</strong> {new Date(server.last_crawled_at).toLocaleString()}</div>
+									{:else}
+										<div class="tooltip-row"><strong>Last Crawl:</strong> Never</div>
+									{/if}
+								</div>
+							</button>
 						</div>
-					</div>
-					<div class="server-actions">
-						<button class="action-btn" on:click={() => toggleServer(server)}>{server.expanded ? 'Hide' : 'Datasets'}</button>
-						<button class="edit-btn" on:click|stopPropagation={() => openEdit(server)}>Edit</button>
-						<button class="crawl-btn" on:click|stopPropagation={() => crawlServer(server.id)} disabled={server.crawling}>{server.crawling ? 'Crawling...' : 'Crawl'}</button>
-						<button class="delete-btn danger" on:click|stopPropagation={() => confirmDelete(server)}>Delete</button>
+						<div class="server-actions">
+							<button class="icon-btn edit-btn" on:click|stopPropagation={() => openEdit(server)} title="Edit">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+									<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+								</svg>
+							</button>
+							<button class="icon-btn crawl-btn" on:click|stopPropagation={() => crawlServer(server.id)} disabled={server.crawling} title={server.crawling ? 'Crawling...' : 'Crawl'}>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<polygon points="5 3 19 12 5 21 5 3"></polygon>
+								</svg>
+							</button>
+							<button class="icon-btn delete-btn" on:click|stopPropagation={() => confirmDelete(server)} title="Delete">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<polyline points="3 6 5 6 21 6"></polyline>
+									<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+								</svg>
+							</button>
+						</div>
 					</div>
 
 					{#if server.expanded}
-						<div class="datasets-section">
+						<div class="datasets-section" on:click|stopPropagation>
 							{#if server.loading}
 								<div class="datasets-loading">Loading datasets...</div>
 							{:else if server.datasets && server.datasets.length > 0}
 								<div class="dataset-list">
 									{#each server.datasets as dataset}
 										<div class="dataset-card">
-											<div class="dataset-info">
-												<div class="dataset-name">{dataset.name}</div>
-												<div class="dataset-meta">
-													{#if dataset.feature_count}
-														<span class="badge">{dataset.feature_count.toLocaleString()} features</span>
-													{/if}
+											<div class="dataset-row">
+												<span class="dataset-name">{dataset.name}</span>
+												{#if dataset.feature_count}
+													<span class="badge feature-badge">{dataset.feature_count.toLocaleString()}</span>
+												{/if}
+												<div class="dataset-actions">
+													<button class="icon-btn info-btn" on:click|stopPropagation title="Info">
+														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+															<circle cx="12" cy="12" r="10"></circle>
+															<line x1="12" y1="16" x2="12" y2="12"></line>
+															<line x1="12" y1="8" x2="12.01" y2="8"></line>
+														</svg>
+														<div class="tooltip">
+															<div class="tooltip-row"><strong>URL:</strong> {dataset.url || 'N/A'}</div>
+															<div class="tooltip-row"><strong>Extent:</strong> {formatExtent(dataset.extent)}</div>
+															<div class="tooltip-row"><strong>Features:</strong> {dataset.feature_count?.toLocaleString() || 'N/A'}</div>
+															{#if dataset.keywords && dataset.keywords.length > 0}
+																<div class="tooltip-row"><strong>Keywords:</strong> {dataset.keywords.join(', ')}</div>
+															{/if}
+														</div>
+													</button>
+													<button class="icon-btn play-btn" on:click|stopPropagation={(e) => downloadDataset(dataset, e)} title={dataset.is_cached ? 'Download' : 'Fetch & Cache'}>
+														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+															<polygon points="5 3 19 12 5 21 5 3"></polygon>
+														</svg>
+													</button>
 												</div>
 											</div>
-											<button class="download-btn" on:click|stopPropagation={(e) => downloadDataset(dataset, e)}>{dataset.is_cached ? 'Download' : 'Fetch & Cache'}</button>
 										</div>
 									{/each}
 								</div>
@@ -260,6 +317,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
+		overflow: visible;
 	}
 
 	.header {
@@ -308,103 +366,232 @@
 		display: flex;
 		flex-direction: column;
 		gap: 12px;
+		overflow: visible;
 	}
 
 	.server-card {
-		padding: 16px;
 		background: white;
 		border: 1px solid rgba(0, 0, 0, 0.1);
 		border-radius: 12px;
-		display: flex;
-		gap: 12px;
-		align-items: flex-start;
-		transition: box-shadow 0.2s;
+		overflow: visible;
+		transition: all 0.2s;
+		cursor: pointer;
 	}
 
 	.server-card:hover {
 		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+		background: rgba(0, 0, 0, 0.01);
+	}
+
+	.server-card.expanded {
+		box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+	}
+
+	.server-header {
+		padding: 10px 12px;
+		display: flex;
+		gap: 8px;
+		align-items: center;
 	}
 
 	.server-info {
 		flex: 1;
 		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 6px;
 	}
 
 	h4 {
-		margin: 0 0 4px 0;
-		font-size: 16px;
+		margin: 0;
+		font-size: 14px;
 		font-weight: 600;
+		flex: 1;
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
-	.url {
-		margin: 0 0 8px 0;
-		font-size: 12px;
-		color: var(--text-secondary);
-		word-break: break-all;
+	.server-info-btn {
+		position: relative;
 	}
 
-	.meta {
-		display: flex;
-		gap: 6px;
-		flex-wrap: wrap;
+	.server-tooltip {
+		display: none;
+		position: absolute;
+		left: 0;
+		top: 100%;
+		margin-top: 4px;
+		background: rgba(0, 0, 0, 0.9);
+		color: white;
+		padding: 8px;
+		border-radius: 6px;
+		font-size: 11px;
+		min-width: 250px;
+		max-width: 300px;
+		z-index: 1000;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+		white-space: normal;
+	}
+
+	.server-info-btn:hover .server-tooltip {
+		display: block;
 	}
 
 	.badge {
-		padding: 4px 8px;
+		padding: 2px 6px;
 		background: rgba(0, 0, 0, 0.05);
-		border-radius: 4px;
-		font-size: 11px;
+		border-radius: 3px;
+		font-size: 10px;
 		text-transform: uppercase;
 		font-weight: 500;
-	}
-
-	.badge.inactive {
-		background: #fee;
-		color: #dc2626;
-	}
-
-	.crawl-btn {
-		padding: 8px 16px;
-		border: 1px solid rgba(0, 0, 0, 0.2);
-		background: white;
-		border-radius: 8px;
-		cursor: pointer;
-		font-size: 13px;
-		transition: all 0.2s;
 		white-space: nowrap;
 	}
 
-	.crawl-btn:hover {
-		background: rgba(0, 0, 0, 0.05);
+	.feature-badge {
+		background: rgba(59, 130, 246, 0.1);
+		color: #3b82f6;
+		font-weight: 600;
 	}
 
-	.edit-btn {
-		padding: 8px 16px;
-		border: 1px solid rgba(0, 0, 0, 0.2);
+	.icon-btn {
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		border: 1px solid rgba(0, 0, 0, 0.15);
 		background: white;
-		border-radius: 8px;
+		border-radius: 6px;
 		cursor: pointer;
-		font-size: 13px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		transition: all 0.2s;
-		white-space: nowrap;
+		flex-shrink: 0;
 	}
 
-	.edit-btn:hover {
+	.icon-btn:hover {
 		background: rgba(0, 0, 0, 0.05);
+		border-color: rgba(0, 0, 0, 0.25);
+	}
+
+	.icon-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.delete-btn {
-		padding: 8px 16px;
-		border: 1px solid rgba(248, 37, 37, 0.759);
-		background: rgba(238, 128, 128, 0.207);
-		border-radius: 8px;
-		cursor: pointer;
-		font-size: 13px;
-		transition: all 0.2s;
-		white-space: nowrap;
+		border-color: #fca5a5;
+		color: #dc2626;
 	}
 
 	.delete-btn:hover {
-		background: rgba(0, 0, 0, 0.05);
+		background: #fee;
+		border-color: #dc2626;
+	}
+
+	.server-actions {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+		position: relative;
+		z-index: 10;
+	}
+
+	.datasets-section {
+		margin-top: 12px;
+		width: 100%;
+	}
+
+	.datasets-loading,
+	.datasets-empty {
+		padding: 12px;
+		text-align: center;
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
+
+	.dataset-list {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.dataset-card {
+		background: rgba(0, 0, 0, 0.02);
+		border: 1px solid rgba(0, 0, 0, 0.08);
+		border-radius: 6px;
+		transition: all 0.2s;
+	}
+
+	.dataset-card:hover {
+		background: rgba(0, 0, 0, 0.04);
+		border-color: rgba(0, 0, 0, 0.15);
+	}
+
+	.dataset-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 8px;
+	}
+
+	.dataset-name {
+		flex: 1;
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--text-primary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		min-width: 0;
+	}
+
+	.dataset-actions {
+		display: flex;
+		gap: 4px;
+		flex-shrink: 0;
+	}
+
+	.info-btn {
+		position: relative;
+	}
+
+	.info-btn .tooltip {
+		display: none;
+		position: absolute;
+		right: 0;
+		top: 100%;
+		margin-top: 4px;
+		background: rgba(0, 0, 0, 0.9);
+		color: white;
+		padding: 8px;
+		border-radius: 6px;
+		font-size: 11px;
+		min-width: 250px;
+		max-width: 300px;
+		z-index: 1000;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+		white-space: normal;
+	}
+
+	.info-btn:hover .tooltip {
+		display: block;
+	}
+
+	.tooltip-row {
+		margin-bottom: 6px;
+		line-height: 1.4;
+		word-break: break-word;
+	}
+
+	.tooltip-row:last-child {
+		margin-bottom: 0;
+	}
+
+	.tooltip-row strong {
+		color: #93c5fd;
+		font-weight: 600;
+		margin-right: 4px;
 	}
 </style>
