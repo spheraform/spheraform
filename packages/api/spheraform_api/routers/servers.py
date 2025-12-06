@@ -143,12 +143,12 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
         ) as adapter:
             # Discover datasets
             async for dataset_meta in adapter.discover_datasets():
-                # Check if dataset already exists
+                # Check if dataset already exists (using access_url as unique identifier)
                 existing = (
                     db.query(Dataset)
                     .filter(
                         Dataset.geoserver_id == server.id,
-                        Dataset.external_id == dataset_meta.external_id,
+                        Dataset.access_url == dataset_meta.access_url,
                     )
                     .first()
                 )

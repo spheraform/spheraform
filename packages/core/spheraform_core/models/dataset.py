@@ -13,7 +13,7 @@ from sqlalchemy import (
     Index,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, deferred
 from geoalchemy2 import Geometry
 import enum
 
@@ -59,8 +59,10 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
     # Themes: hydro, transport, admin, boundaries, elevation, imagery, etc.
 
     # Spatial extent (for spatial search)
+    # Deferred loading to avoid loading large geometry data by default
     bbox: Mapped[Optional[str]] = mapped_column(
         Geometry(geometry_type="POLYGON", srid=4326),
+        deferred=True,
         nullable=True,
     )
 
