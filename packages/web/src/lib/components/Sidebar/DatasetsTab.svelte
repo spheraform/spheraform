@@ -78,13 +78,13 @@
 
 				const updatedDataset = datasets.find(d => d.id === dataset.id);
 				if (updatedDataset?.cache_table) {
-					mapStore.addLayer(updatedDataset.id, updatedDataset.cache_table);
+					mapStore.addLayer(updatedDataset.id, updatedDataset.name, updatedDataset.cache_table);
 				}
 			} catch (e) {
 				alert('Error caching dataset: ' + (e instanceof Error ? e.message : 'Unknown error'));
 			}
 		} else {
-			mapStore.addLayer(dataset.id, dataset.cache_table);
+			mapStore.addLayer(dataset.id, dataset.name, dataset.cache_table);
 		}
 	}
 </script>

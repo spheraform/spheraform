@@ -109,6 +109,11 @@ class DownloadService:
                     with open(temp_path, 'r') as f:
                         geojson_data = json.load(f)
 
+                    # Check if GeoJSON has features
+                    features = geojson_data.get("features", [])
+                    if not features or len(features) == 0:
+                        raise Exception(f"Download returned 0 features - dataset may be unavailable or query unsupported by server")
+
                     # Store in PostGIS
                     await self._store_in_postgis(
                         cache_table=cache_table,

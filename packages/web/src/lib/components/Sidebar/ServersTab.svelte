@@ -240,7 +240,7 @@
 				const res = await fetch('/api/v1/download', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ dataset_ids: [dataset.id], format: 'geojson' })
+					body: JSON.stringify({ dataset_ids: [dataset.id], format: 'geojson', force_refresh: true })
 				});
 
 				if (!res.ok) {
