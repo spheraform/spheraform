@@ -2,13 +2,14 @@
 	import { createEventDispatcher, onMount } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import ServersTab from './ServersTab.svelte';
+	import ActiveTab from './ActiveTab.svelte';
 	import AnalyticsTab from './AnalyticsTab.svelte';
 
 	export let open = false;
 
 	const dispatch = createEventDispatcher();
 
-	type Tab = 'catalogue' | 'analytics';
+	type Tab = 'catalogue' | 'active' | 'analytics';
 	let activeTab: Tab = 'catalogue';
 
 	// Sidebar width management
@@ -74,6 +75,13 @@
 			</button>
 			<button
 				class="tab"
+				class:active={activeTab === 'active'}
+				on:click={() => activeTab = 'active'}
+			>
+				Active
+			</button>
+			<button
+				class="tab"
 				class:active={activeTab === 'analytics'}
 				on:click={() => activeTab = 'analytics'}
 			>
@@ -84,6 +92,8 @@
 		<div class="tab-content">
 			{#if activeTab === 'catalogue'}
 				<ServersTab {sidebarWidth} />
+			{:else if activeTab === 'active'}
+				<ActiveTab />
 			{:else if activeTab === 'analytics'}
 				<AnalyticsTab />
 			{/if}
