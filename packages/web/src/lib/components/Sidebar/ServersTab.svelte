@@ -280,10 +280,62 @@
 		async function showOnMap(dataset: any, e?: Event) {
 			e && e.stopPropagation();
 			try {
+				// If not cached, fetch it first
 				if (!dataset.is_cached || !dataset.cache_table) {
-					infoMessage = 'Dataset must be cached first. Click the fetch button.';
-					showInfoModal = true;
-					return;
+					console.log(`Dataset ${dataset.id} not cached, fetching first...`);
+
+					// Set loading state
+					fetchingDatasets[dataset.id] = true;
+					fetchingDatasets = { ...fetchingDatasets };
+
+					// Start fetch
+					const res = await fetch('/api/v1/download', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ dataset_ids: [dataset.id], format: 'geojson', force_refresh: true })
+					});
+
+					if (!res.ok) {
+						const errorText = await res.text();
+						throw new Error(`Failed to fetch dataset: ${errorText}`);
+					}
+
+					const data = await res.json();
+					console.log('Download response:', data);
+
+					// Poll for completion (check every second for up to 60 seconds)
+					let attempts = 0;
+					const maxAttempts = 60;
+
+					while (attempts < maxAttempts) {
+						await new Promise(resolve => setTimeout(resolve, 1000));
+
+						// Refresh dataset info
+						const statusRes = await fetch(`/api/v1/datasets/${dataset.id}`);
+						if (statusRes.ok) {
+							const updatedDataset = await statusRes.json();
+							if (updatedDataset.is_cached && updatedDataset.cache_table) {
+								console.log('Dataset is now cached!');
+								dataset = updatedDataset;
+								break;
+							}
+						}
+						attempts++;
+					}
+
+					// Clear loading state
+					delete fetchingDatasets[dataset.id];
+					fetchingDatasets = { ...fetchingDatasets };
+
+					if (!dataset.is_cached) {
+						throw new Error('Dataset fetch timed out');
+					}
+
+					// Reload server datasets to update UI
+					const server = servers.find(s => s.datasets?.some(d => d.id === dataset.id));
+					if (server) {
+						await loadDatasets(server);
+					}
 				}
 
 				console.log(`Adding dataset ${dataset.id} to map...`);
