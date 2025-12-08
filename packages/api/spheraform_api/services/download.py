@@ -158,11 +158,11 @@ class DownloadService:
         # Drop table if it exists
         self.db.execute(text(f"DROP TABLE IF EXISTS {cache_table}"))
 
-        # Create table
+        # Create table with SRID 3857 (Web Mercator) for Martin tile server
         create_table_sql = f"""
         CREATE TABLE {cache_table} (
             id SERIAL PRIMARY KEY,
-            geom GEOMETRY(Geometry, 4326),
+            geom GEOMETRY(Geometry, 3857),
             properties JSONB
         )
         """
@@ -176,10 +176,11 @@ class DownloadService:
             geometry_json = json.dumps(feature.get("geometry"))
             properties_json = json.dumps(feature.get("properties", {}))
 
+            # Transform from 4326 (WGS84) to 3857 (Web Mercator) for Martin
             insert_sql = f"""
             INSERT INTO {cache_table} (geom, properties)
             VALUES (
-                ST_GeomFromGeoJSON(:geometry),
+                ST_Transform(ST_GeomFromGeoJSON(:geometry), 3857),
                 CAST(:properties AS jsonb)
             )
             """
@@ -209,14 +210,14 @@ class DownloadService:
 
         logger.info(f"Retrieving cached data from {dataset.cache_table}")
 
-        # Query PostGIS table and export as GeoJSON
+        # Query PostGIS table and export as GeoJSON (transform back to 4326)
         query = text(f"""
             SELECT jsonb_build_object(
                 'type', 'FeatureCollection',
                 'features', jsonb_agg(
                     jsonb_build_object(
                         'type', 'Feature',
-                        'geometry', ST_AsGeoJSON(geom)::jsonb,
+                        'geometry', ST_AsGeoJSON(ST_Transform(geom, 4326))::jsonb,
                         'properties', properties
                     )
                 )
