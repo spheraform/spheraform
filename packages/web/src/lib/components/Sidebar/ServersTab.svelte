@@ -128,12 +128,61 @@
 			if (!response.ok) throw new Error('Failed to fetch servers');
 			const list = await response.json();
 			servers = list.map((s: any) => ({ ...s, expanded: false, loading: false, crawling: false }));
+
+			// Resume any in-progress crawl jobs
+			await resumeCrawlJobs();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Unknown error';
 		} finally {
 			loading = false;
 		}
 	});
+
+	async function resumeCrawlJobs() {
+		// Check each server for running/pending crawl jobs
+		for (const server of servers) {
+			const serverId = server.id; // Capture server ID to avoid closure issues
+			try {
+				const res = await fetch(`/api/v1/servers/${serverId}/crawl/latest`);
+				if (res.ok) {
+					const job = await res.json();
+					if (job && (job.status === 'running' || job.status === 'pending')) {
+						// Resume polling this job
+						servers = servers.map(s =>
+							s.id === serverId ? { ...s, crawling: true, crawlJobId: job.id, crawlJobStatus: job } : s
+						);
+
+						// Start polling
+						pollJobStatus(
+							`/api/v1/servers/crawl/${job.id}`,
+							(progressJob) => {
+								servers = servers.map(s =>
+									s.id === serverId ? { ...s, crawlJobStatus: progressJob } : s
+								);
+							},
+							{ interval: 2500, timeout: 600000 }
+						).then((finalJob) => {
+							// Job completed
+							if (finalJob.status === 'completed') {
+								const srv = servers.find(s => s.id === serverId);
+								if (srv?.expanded) {
+									refreshServerDatasets(serverId);
+								}
+							}
+						}).catch(() => {
+							// Ignore polling errors
+						}).finally(() => {
+							servers = servers.map(s =>
+								s.id === serverId ? { ...s, crawling: false, crawlJobId: undefined } : s
+							);
+						});
+					}
+				}
+			} catch {
+				// Ignore errors checking for jobs
+			}
+		}
+	}
 
 	function addServer() {
 		// Open modal instead of using prompt()
@@ -468,7 +517,7 @@
 			{ label: 'Type', value: server.provider_type },
 			{ label: 'Country', value: server.country || 'N/A' },
 			{ label: 'URL', value: server.base_url, link: true },
-			{ label: 'Datasets', value: String(server.datasets?.length || 0) },
+			{ label: 'Datasets', value: String(server.dataset_count || 0) },
 			{ label: 'Status', value: server.health_status || 'Unknown' },
 			{ label: 'Last Crawl', value: server.last_crawl ? new Date(server.last_crawl).toLocaleString() : 'Never' }
 		];
@@ -610,17 +659,27 @@
 							</button>
 						</div>
 						<div class="server-actions">
-							<button class="icon-btn crawl-btn" on:click|stopPropagation={() => crawlServer(server.id)} disabled={server.crawling} title={server.crawling ? 'Crawling...' : 'Crawl'}>
-								{#if server.crawling && server.crawlJobStatus}
-									<span class="progress-text">{formatJobProgress(server.crawlJobStatus)}</span>
-								{:else if server.crawling}
-									<span class="progress-text">Starting...</span>
+							<button
+								class="icon-btn crawl-btn"
+								on:click|stopPropagation={() => crawlServer(server.id)}
+								disabled={server.crawling}
+								title={server.crawling ? '' : 'Crawl server for datasets'}>
+								{#if server.crawling}
+									<svg class="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+										<path d="M12 2 A10 10 0 0 1 22 12" stroke-linecap="round"></path>
+									</svg>
 								{:else}
 									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 										<polygon points="5 3 19 12 5 21 5 3"></polygon>
 									</svg>
 								{/if}
 							</button>
+							{#if server.crawling && server.crawlJobStatus}
+								<span class="progress-badge">{formatJobProgress(server.crawlJobStatus)}</span>
+							{:else if server.crawling}
+								<span class="progress-badge">Starting...</span>
+							{/if}
 							<button class="icon-btn edit-btn" on:click|stopPropagation={() => openEdit(server)} title="Edit">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -1142,6 +1201,21 @@
 		to {
 			transform: rotate(360deg);
 		}
+	}
+
+	/* Progress badge */
+	.progress-badge {
+		display: inline-block;
+		margin-left: 8px;
+		padding: 2px 8px;
+		font-size: 11px;
+		font-weight: 500;
+		background: rgba(59, 130, 246, 0.1);
+		color: #3b82f6;
+		border: 1px solid rgba(59, 130, 246, 0.2);
+		border-radius: 12px;
+		white-space: nowrap;
+		line-height: 1.4;
 	}
 
 	.fetch-btn.loading {

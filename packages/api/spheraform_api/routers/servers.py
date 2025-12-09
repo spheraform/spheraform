@@ -165,6 +165,42 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{server_id}/crawl/latest", response_model=CrawlJobResponse)
+async def get_latest_crawl_job(server_id: UUID, db: Session = Depends(get_db)):
+    """Get the most recent crawl job for a server (for resuming progress tracking)."""
+    job = (
+        db.query(CrawlJob)
+        .filter(CrawlJob.geoserver_id == server_id)
+        .order_by(CrawlJob.created_at.desc())
+        .first()
+    )
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No crawl jobs found for server {server_id}",
+        )
+
+    progress = None
+
+    return CrawlJobResponse(
+        id=job.id,
+        geoserver_id=job.geoserver_id,
+        status=job.status.value,
+        progress=progress,
+        total_services=job.total_services,
+        services_processed=job.services_processed,
+        datasets_discovered=job.datasets_discovered,
+        datasets_new=job.datasets_new,
+        datasets_updated=job.datasets_updated,
+        current_stage=job.current_stage,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+    )
+
+
 @router.get("/crawl/{job_id}", response_model=CrawlJobResponse)
 async def get_crawl_status(job_id: UUID, db: Session = Depends(get_db)):
     """Get the status and progress of a crawl job."""
@@ -175,10 +211,11 @@ async def get_crawl_status(job_id: UUID, db: Session = Depends(get_db)):
             detail=f"Crawl job {job_id} not found",
         )
 
-    # Calculate progress
+    # Note: We don't calculate progress percentage for crawl jobs because
+    # we don't know the total number of datasets upfront (only services).
+    # services_processed is an estimate based on datasets_discovered / 5.
+    # Better to show actual dataset count than misleading percentage.
     progress = None
-    if job.total_services and job.total_services > 0:
-        progress = (job.services_processed / job.total_services) * 100
 
     return CrawlJobResponse(
         id=job.id,

@@ -81,10 +81,11 @@ export function formatJobProgress(job: any): string {
   let message = '';
 
   // Crawl job progress
-  if ('services_processed' in job && job.total_services) {
-    message = `${job.services_processed}/${job.total_services} services`;
-    if (progress !== null && progress !== undefined) {
-      message = `${Math.round(progress)}% - ${message}`;
+  if ('datasets_discovered' in job) {
+    message = `${job.datasets_discovered} datasets`;
+    // Don't show service estimate if it's clearly wrong (no progress yet)
+    if (job.total_services && job.datasets_discovered > 0) {
+      message += ` (~${job.services_processed || 0}/${job.total_services} svcs)`;
     }
   }
   // Download job progress
