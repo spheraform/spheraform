@@ -8,8 +8,24 @@
 
 	let sidebarOpen = false;
 
+	onMount(() => {
+		// Load saved sidebar state from localStorage
+		const saved = localStorage.getItem('sidebar-open');
+		if (saved !== null) {
+			sidebarOpen = saved === 'true';
+		}
+	});
+
 	function toggleSidebar() {
 		sidebarOpen = !sidebarOpen;
+		// Save state to localStorage
+		localStorage.setItem('sidebar-open', sidebarOpen.toString());
+	}
+
+	function closeSidebar() {
+		sidebarOpen = false;
+		// Save state to localStorage
+		localStorage.setItem('sidebar-open', 'false');
 	}
 </script>
 
@@ -20,7 +36,7 @@
 	<SearchBar />
 	<TopRightBubbles />
 
-	<Sidebar open={sidebarOpen} on:close={() => sidebarOpen = false} />
+	<Sidebar open={sidebarOpen} on:close={closeSidebar} />
 </div>
 
 <style>

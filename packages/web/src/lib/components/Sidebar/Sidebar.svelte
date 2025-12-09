@@ -2,13 +2,14 @@
 	import { createEventDispatcher, onMount } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import ServersTab from './ServersTab.svelte';
+	import ActiveTab from './ActiveTab.svelte';
 	import AnalyticsTab from './AnalyticsTab.svelte';
 
 	export let open = false;
 
 	const dispatch = createEventDispatcher();
 
-	type Tab = 'catalogue' | 'analytics';
+	type Tab = 'catalogue' | 'active' | 'analytics';
 	let activeTab: Tab = 'catalogue';
 
 	// Sidebar width management
@@ -17,11 +18,23 @@
 
 	onMount(() => {
 		// Load saved width from localStorage
-		const saved = localStorage.getItem('sidebar-width');
-		if (saved) {
-			sidebarWidth = parseInt(saved, 10);
+		const savedWidth = localStorage.getItem('sidebar-width');
+		if (savedWidth) {
+			sidebarWidth = parseInt(savedWidth, 10);
+		}
+
+		// Load saved active tab from localStorage
+		const savedTab = localStorage.getItem('sidebar-active-tab');
+		if (savedTab && (savedTab === 'catalogue' || savedTab === 'active' || savedTab === 'analytics')) {
+			activeTab = savedTab as Tab;
 		}
 	});
+
+	function setActiveTab(tab: Tab) {
+		activeTab = tab;
+		// Save active tab to localStorage
+		localStorage.setItem('sidebar-active-tab', tab);
+	}
 
 	function close() {
 		dispatch('close');
@@ -52,7 +65,7 @@
 <svelte:window on:mousemove={resize} on:mouseup={stopResize} />
 
 {#if open}
-	<div class="sidebar-overlay" on:click={close} transition:slide={{ duration: 200 }}></div>
+	<div class="sidebar-overlay" transition:slide={{ duration: 200 }}></div>
 	<div class="sidebar" style="width: {sidebarWidth}px" transition:slide={{ duration: 300, axis: 'x' }}>
 		<div class="sidebar-header">
 			<img src="/logo.png" alt="Spheraform" class="logo" />
@@ -68,14 +81,21 @@
 			<button
 				class="tab"
 				class:active={activeTab === 'catalogue'}
-				on:click={() => activeTab = 'catalogue'}
+				on:click={() => setActiveTab('catalogue')}
 			>
 				Catalogue
 			</button>
 			<button
 				class="tab"
+				class:active={activeTab === 'active'}
+				on:click={() => setActiveTab('active')}
+			>
+				Active
+			</button>
+			<button
+				class="tab"
 				class:active={activeTab === 'analytics'}
-				on:click={() => activeTab = 'analytics'}
+				on:click={() => setActiveTab('analytics')}
 			>
 				Analytics
 			</button>
@@ -84,6 +104,8 @@
 		<div class="tab-content">
 			{#if activeTab === 'catalogue'}
 				<ServersTab {sidebarWidth} />
+			{:else if activeTab === 'active'}
+				<ActiveTab />
 			{:else if activeTab === 'analytics'}
 				<AnalyticsTab />
 			{/if}
@@ -108,6 +130,7 @@
 		height: 100%;
 		background: rgba(0, 0, 0, 0.3);
 		z-index: 1999;
+		pointer-events: none;
 	}
 
 	.sidebar {
