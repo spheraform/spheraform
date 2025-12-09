@@ -8,6 +8,7 @@ from .job import (
     DownloadJob,
     DownloadChunk,
     ExportJob,
+    CrawlJob,
     JobStatus,
     ExportFormat,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "DownloadJob",
     "DownloadChunk",
     "ExportJob",
+    "CrawlJob",
     "JobStatus",
     "ExportFormat",
     # Taxonomy
