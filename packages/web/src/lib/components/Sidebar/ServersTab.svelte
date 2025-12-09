@@ -4,6 +4,7 @@
 	import ConfirmModal from '$lib/components/Modals/ConfirmModal.svelte';
 	import InfoModal from '$lib/components/Modals/InfoModal.svelte';
 	import InfoDetailModal from '$lib/components/Modals/InfoDetailModal.svelte';
+	import { pollJobStatus, formatJobProgress } from '$lib/utils/polling';
 
 	interface Server {
 		id: string;
@@ -19,6 +20,8 @@
 		loading?: boolean;
 		crawling?: boolean;
 		datasets?: any[];
+		crawlJobId?: string;
+		crawlJobStatus?: any;
 	}
 
 	export let sidebarWidth: number = 400;
@@ -116,16 +119,81 @@
 
 	async function crawlServer(serverId: string) {
 		try {
+			// Set server as crawling
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, crawling: true, crawlJobStatus: null } : s
+			);
+
+			// Start crawl job
 			const response = await fetch(`/api/v1/servers/${serverId}/crawl`, { method: 'POST' });
-			if (!response.ok) throw new Error('Failed to crawl server');
-			infoMessage = 'Crawl started. This may take a while.';
-			showInfoModal = true;
+			if (!response.ok) throw new Error('Failed to start crawl');
+
+			const job = await response.json();
+			console.log('Crawl job started:', job);
+
+			// Store job ID and start polling
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, crawlJobId: job.id, crawlJobStatus: job } : s
+			);
+
+			// Poll for progress
+			try {
+				const finalJob = await pollJobStatus(
+					`/api/v1/servers/crawl/${job.id}`,
+					(progressJob) => {
+						// Update UI with progress
+						servers = servers.map(s =>
+							s.id === serverId ? { ...s, crawlJobStatus: progressJob } : s
+						);
+					},
+					{ interval: 2500, timeout: 600000 }  // 10 minute timeout for large servers
+				);
+
+				// Job completed - refresh dataset list
+				if (finalJob.status === 'completed') {
+					infoMessage = `Crawl complete: ${finalJob.datasets_new} new, ${finalJob.datasets_updated} updated`;
+					showInfoModal = true;
+
+					// Refresh datasets for this server if expanded
+					const server = servers.find(s => s.id === serverId);
+					if (server?.expanded) {
+						await refreshServerDatasets(serverId);
+					}
+
+					// Reload servers list to update last_crawl timestamp
+					await loadServers();
+				} else if (finalJob.status === 'failed') {
+					infoMessage = `Crawl failed: ${finalJob.error}`;
+					showInfoModal = true;
+				}
+			} finally {
+				// Clear crawling state
+				servers = servers.map(s =>
+					s.id === serverId ? { ...s, crawling: false, crawlJobId: undefined, crawlJobStatus: undefined } : s
+				);
+			}
 		} catch (e) {
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, crawling: false } : s
+			);
 			infoMessage = 'Error crawling server: ' + (e instanceof Error ? e.message : 'Unknown error');
 			showInfoModal = true;
 		}
+	}
 
-    }
+	async function refreshServerDatasets(serverId: string) {
+		try {
+			const res = await fetch(`/api/v1/datasets?geoserver_id=${serverId}&limit=1000`);
+			if (!res.ok) throw new Error('Failed to refresh datasets');
+			const datasets = await res.json();
+
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, datasets } : s
+			);
+		} catch (err) {
+			console.error('Failed to refresh datasets:', err);
+		}
+	}
 
 		function openEdit(server: Server) {
 			serverBeingEdited = server;
@@ -438,9 +506,15 @@
 						</div>
 						<div class="server-actions">
 							<button class="icon-btn crawl-btn" on:click|stopPropagation={() => crawlServer(server.id)} disabled={server.crawling} title={server.crawling ? 'Crawling...' : 'Crawl'}>
-								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<polygon points="5 3 19 12 5 21 5 3"></polygon>
-								</svg>
+								{#if server.crawling && server.crawlJobStatus}
+									<span class="progress-text">{formatJobProgress(server.crawlJobStatus)}</span>
+								{:else if server.crawling}
+									<span class="progress-text">Starting...</span>
+								{:else}
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<polygon points="5 3 19 12 5 21 5 3"></polygon>
+									</svg>
+								{/if}
 							</button>
 							<button class="icon-btn edit-btn" on:click|stopPropagation={() => openEdit(server)} title="Edit">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
