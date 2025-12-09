@@ -35,39 +35,42 @@
 	let sortBy: 'name' | 'country' | '' = '';
 	let sortAscending = true;
 
-	// Dataset search and sorting state (per server)
-	let datasetSearchQuery: {[serverId: string]: string} = {};
-	let datasetSortByCached: {[serverId: string]: boolean} = {};
+	// Global dataset search state
+	let globalDatasetSearch = '';
 
 	// Track which datasets are currently being fetched
 	let fetchingDatasets: {[datasetId: string]: boolean} = {};
 
-	// Function to filter and sort datasets for a server
-	function getFilteredDatasets(server: Server) {
-		if (!server.datasets) return [];
+	// Function to filter datasets based on global search
+	function filterDatasetsBySearch(datasets: any[]) {
+		if (!globalDatasetSearch) return datasets;
 
-		let filtered = server.datasets;
+		const searchQuery = globalDatasetSearch.toLowerCase();
+		return datasets.filter(d =>
+			d.name?.toLowerCase().includes(searchQuery) ||
+			d.description?.toLowerCase().includes(searchQuery) ||
+			d.themes?.some((t: string) => t.toLowerCase().includes(searchQuery)) ||
+			d.keywords?.some((k: string) => k.toLowerCase().includes(searchQuery))
+		);
+	}
 
-		// Apply search filter
-		const searchQuery = (datasetSearchQuery[server.id] || '').toLowerCase();
-		if (searchQuery) {
-			filtered = filtered.filter(d =>
-				d.name?.toLowerCase().includes(searchQuery) ||
-				d.description?.toLowerCase().includes(searchQuery)
-			);
-		}
+	// Function to sort datasets by cached status (always cached first)
+	function sortDatasetsByCached(datasets: any[]) {
+		return [...datasets].sort((a, b) => {
+			// Cached first
+			if (a.is_cached && !b.is_cached) return -1;
+			if (!a.is_cached && b.is_cached) return 1;
+			return 0;
+		});
+	}
 
-		// Apply sorting by cached status
-		if (datasetSortByCached[server.id]) {
-			filtered = [...filtered].sort((a, b) => {
-				// Cached first
-				if (a.is_cached && !b.is_cached) return -1;
-				if (!a.is_cached && b.is_cached) return 1;
-				return 0;
-			});
-		}
-
-		return filtered;
+	// Auto-load datasets for all servers when search is active
+	$: if (globalDatasetSearch) {
+		servers.forEach(server => {
+			if (!server.datasets && !server.loading) {
+				loadDatasets(server);
+			}
+		});
 	}
 
 	// Grid view: activate when sidebar is wider than 600px
@@ -83,6 +86,14 @@
 		.filter(s => !filterCountry || s.country === filterCountry)
 		.filter(s => !filterServerType || s.provider_type === filterServerType)
 		.filter(s => !filterHealthStatus || s.health_status === filterHealthStatus)
+		.filter(s => {
+			// If there's a global search, only show servers with matching datasets
+			if (globalDatasetSearch && s.datasets && s.datasets.length > 0) {
+				const matchingDatasets = filterDatasetsBySearch(s.datasets);
+				return matchingDatasets.length > 0;
+			}
+			return true;
+		})
 		.sort((a, b) => {
 			if (!sortBy) return 0;
 			const aVal = a[sortBy] || '';
@@ -280,62 +291,11 @@
 		async function showOnMap(dataset: any, e?: Event) {
 			e && e.stopPropagation();
 			try {
-				// If not cached, fetch it first
+				// Only work with cached datasets
 				if (!dataset.is_cached || !dataset.cache_table) {
-					console.log(`Dataset ${dataset.id} not cached, fetching first...`);
-
-					// Set loading state
-					fetchingDatasets[dataset.id] = true;
-					fetchingDatasets = { ...fetchingDatasets };
-
-					// Start fetch
-					const res = await fetch('/api/v1/download', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ dataset_ids: [dataset.id], format: 'geojson', force_refresh: true })
-					});
-
-					if (!res.ok) {
-						const errorText = await res.text();
-						throw new Error(`Failed to fetch dataset: ${errorText}`);
-					}
-
-					const data = await res.json();
-					console.log('Download response:', data);
-
-					// Poll for completion (check every second for up to 60 seconds)
-					let attempts = 0;
-					const maxAttempts = 60;
-
-					while (attempts < maxAttempts) {
-						await new Promise(resolve => setTimeout(resolve, 1000));
-
-						// Refresh dataset info
-						const statusRes = await fetch(`/api/v1/datasets/${dataset.id}`);
-						if (statusRes.ok) {
-							const updatedDataset = await statusRes.json();
-							if (updatedDataset.is_cached && updatedDataset.cache_table) {
-								console.log('Dataset is now cached!');
-								dataset = updatedDataset;
-								break;
-							}
-						}
-						attempts++;
-					}
-
-					// Clear loading state
-					delete fetchingDatasets[dataset.id];
-					fetchingDatasets = { ...fetchingDatasets };
-
-					if (!dataset.is_cached) {
-						throw new Error('Dataset fetch timed out');
-					}
-
-					// Reload server datasets to update UI
-					const server = servers.find(s => s.datasets?.some(d => d.id === dataset.id));
-					if (server) {
-						await loadDatasets(server);
-					}
+					infoMessage = 'Please fetch and cache the dataset first using the refresh button.';
+					showInfoModal = true;
+					return;
 				}
 
 				console.log(`Adding dataset ${dataset.id} to map...`);
@@ -499,45 +459,58 @@
 		</button>
 	</div>
 
-	<!-- Filters and Sorting -->
-	<div class="filters">
-		<select bind:value={filterCountry} class="filter-select">
-			<option value="">All Countries</option>
-			{#each countries as country}
-				<option value={country}>{country}</option>
-			{/each}
-		</select>
-		<select bind:value={filterServerType} class="filter-select">
-			<option value="">All Types</option>
-			{#each serverTypes as type}
-				<option value={type}>{type}</option>
-			{/each}
-		</select>
-		<select bind:value={filterHealthStatus} class="filter-select">
-			<option value="">All Status</option>
-			{#each healthStatuses as status}
-				<option value={status}>{status}</option>
-			{/each}
-		</select>
-		<select bind:value={sortBy} class="filter-select">
-			<option value="">No Sort</option>
-			<option value="name">Sort by Name</option>
-			<option value="country">Sort by Country</option>
-		</select>
-		{#if sortBy}
-			<button class="sort-direction-btn" on:click={() => sortAscending = !sortAscending} title={sortAscending ? 'Ascending' : 'Descending'}>
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					{#if sortAscending}
-						<line x1="12" y1="19" x2="12" y2="5"></line>
-						<polyline points="5 12 12 5 19 12"></polyline>
-					{:else}
-						<line x1="12" y1="5" x2="12" y2="19"></line>
-						<polyline points="5 12 12 19 19 12"></polyline>
-					{/if}
-				</svg>
-			</button>
-		{/if}
+	<!-- Global Dataset Search -->
+	<div class="global-search-section">
+		<input
+			type="text"
+			class="global-search-input"
+			placeholder="Search all datasets (name, theme, keyword)..."
+			bind:value={globalDatasetSearch}
+		/>
 	</div>
+
+	<!-- Server Filters (collapsible) -->
+	<details class="server-filters-details">
+		<summary>Server Filters</summary>
+		<div class="filters">
+			<select bind:value={filterCountry} class="filter-select">
+				<option value="">All Countries</option>
+				{#each countries as country}
+					<option value={country}>{country}</option>
+				{/each}
+			</select>
+			<select bind:value={filterServerType} class="filter-select">
+				<option value="">All Types</option>
+				{#each serverTypes as type}
+					<option value={type}>{type}</option>
+				{/each}
+			</select>
+			<select bind:value={filterHealthStatus} class="filter-select">
+				<option value="">All Status</option>
+				{#each healthStatuses as status}
+					<option value={status}>{status}</option>
+				{/each}
+			</select>
+			<select bind:value={sortBy} class="filter-select">
+				<option value="">No Sort</option>
+				<option value="name">Sort by Name</option>
+				<option value="country">Sort by Country</option>
+			</select>
+			{#if sortBy}
+				<button class="sort-direction-btn" on:click={() => sortAscending = !sortAscending} title={sortAscending ? 'Ascending' : 'Descending'}>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						{#if sortAscending}
+							<line x1="12" y1="19" x2="12" y2="5"></line>
+							<polyline points="5 12 12 5 19 12"></polyline>
+						{:else}
+							<line x1="12" y1="5" x2="12" y2="19"></line>
+							<polyline points="5 12 12 19 19 12"></polyline>
+						{/if}
+					</svg>
+				</button>
+			{/if}
+		</div>
+	</details>
 
 	<!-- Modals -->
 	<ServerForm open={showAddModal} mode="add" on:save={handleAddSave} on:close={() => showAddModal = false} />
@@ -553,6 +526,7 @@
 	{:else if servers.length === 0}
 		<div class="empty">No servers configured. Click "Add Server" to get started.</div>
 	{:else}
+		<!-- Server Management View -->
 		<div class="server-list" class:grid-view={useGridView}>
 			{#each filteredServers as server}
 				<div class="server-card" class:expanded={server.expanded} on:click={() => toggleServer(server)}>
@@ -593,25 +567,12 @@
 							{#if server.loading}
 								<div class="datasets-loading">Loading datasets...</div>
 							{:else if server.datasets && server.datasets.length > 0}
-								<div class="dataset-controls">
-								<input
-									type="text"
-									class="dataset-search"
-									placeholder="Search datasets..."
-									bind:value={datasetSearchQuery[server.id]}
-									on:click|stopPropagation
-								/>
-								<label class="sort-checkbox">
-									<input
-										type="checkbox"
-										bind:checked={datasetSortByCached[server.id]}
-										on:click|stopPropagation
-									/>
-									<span>Cached first</span>
-								</label>
-							</div>
+								{@const filteredAndSortedDatasets = sortDatasetsByCached(filterDatasetsBySearch(server.datasets))}
+								{#if filteredAndSortedDatasets.length === 0}
+									<div class="datasets-empty">No datasets match your search</div>
+								{:else}
 							<div class="dataset-list">
-									{#each getFilteredDatasets(server) as dataset}
+									{#each filteredAndSortedDatasets as dataset}
 										<div class="dataset-card" class:cached={dataset.is_cached}>
 											<div class="dataset-row">
 												<div class="dataset-info">
@@ -661,27 +622,36 @@
 															</svg>
 														{/if}
 													</button>
-													{#if dataset.is_cached}
-														<button class="icon-btn map-btn" on:click|stopPropagation={(e) => showOnMap(dataset, e)} title="Show on Map">
-															<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-																<path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"></path>
-																<line x1="8" y1="2" x2="8" y2="18"></line>
-																<line x1="16" y1="6" x2="16" y2="22"></line>
-															</svg>
-														</button>
-														<button class="icon-btn download-btn" on:click|stopPropagation={(e) => downloadDatasetFile(dataset, e)} title="Download File">
-															<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-																<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-																<polyline points="7 10 12 15 17 10"></polyline>
-																<line x1="12" y1="15" x2="12" y2="3"></line>
-															</svg>
-														</button>
-													{/if}
+													<button
+														class="icon-btn map-btn"
+														on:click|stopPropagation={(e) => showOnMap(dataset, e)}
+														disabled={!dataset.is_cached}
+														title={dataset.is_cached ? 'Show on Map' : 'Cache dataset first'}
+													>
+														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+															<path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"></path>
+															<line x1="8" y1="2" x2="8" y2="18"></line>
+															<line x1="16" y1="6" x2="16" y2="22"></line>
+														</svg>
+													</button>
+													<button
+														class="icon-btn download-btn"
+														on:click|stopPropagation={(e) => downloadDatasetFile(dataset, e)}
+														disabled={!dataset.is_cached}
+														title={dataset.is_cached ? 'Download File' : 'Cache dataset first'}
+													>
+														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+															<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+															<polyline points="7 10 12 15 17 10"></polyline>
+															<line x1="12" y1="15" x2="12" y2="3"></line>
+														</svg>
+													</button>
 												</div>
 											</div>
 										</div>
 									{/each}
 								</div>
+								{/if}
 							{:else}
 								<div class="datasets-empty">No datasets. Try crawling the server.</div>
 							{/if}
@@ -826,14 +796,15 @@
 		flex-shrink: 0;
 	}
 
-	.icon-btn:hover {
+	.icon-btn:hover:not(:disabled) {
 		background: rgba(0, 0, 0, 0.05);
 		border-color: rgba(0, 0, 0, 0.25);
 	}
 
 	.icon-btn:disabled {
-		opacity: 0.5;
+		opacity: 0.4;
 		cursor: not-allowed;
+		background: rgba(0, 0, 0, 0.02);
 	}
 
 	.delete-btn {
@@ -1102,5 +1073,124 @@
 	.fetch-btn.loading {
 		opacity: 0.7;
 		cursor: wait;
+	}
+
+	/* Global Search Section */
+	.global-search-section {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-bottom: 16px;
+		padding-bottom: 16px;
+		border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+	}
+
+	.global-search-input {
+		width: 100%;
+		padding: 10px 12px;
+		border: 1px solid rgba(0, 0, 0, 0.15);
+		border-radius: 8px;
+		background: white;
+		font-size: 14px;
+		color: var(--text-primary);
+		transition: all 0.2s;
+	}
+
+	.global-search-input:hover {
+		border-color: rgba(0, 0, 0, 0.25);
+	}
+
+	.global-search-input:focus {
+		outline: none;
+		border-color: var(--text-primary);
+		box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.05);
+	}
+
+	.global-search-input::placeholder {
+		color: var(--text-secondary);
+	}
+
+	/* Server Filters Collapsible */
+	.server-filters-details {
+		margin-bottom: 16px;
+		border: 1px solid rgba(0, 0, 0, 0.1);
+		border-radius: 8px;
+		background: white;
+	}
+
+	.server-filters-details summary {
+		padding: 12px;
+		cursor: pointer;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-primary);
+		list-style: none;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		transition: background 0.2s;
+	}
+
+	.server-filters-details summary:hover {
+		background: rgba(0, 0, 0, 0.02);
+	}
+
+	.server-filters-details summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.server-filters-details[open] summary {
+		border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+	}
+
+	.server-filters-details .filters {
+		margin: 12px;
+		margin-bottom: 0;
+		padding-bottom: 0;
+		border-bottom: none;
+	}
+
+	/* Global Datasets Section */
+	.global-datasets-section {
+		margin-bottom: 20px;
+	}
+
+	.section-title {
+		margin: 0 0 12px 0;
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
+	.empty-results {
+		padding: 32px 16px;
+		text-align: center;
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
+
+	.dataset-card.global {
+		margin-bottom: 8px;
+	}
+
+	.dataset-source {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 8px;
+		background: rgba(0, 0, 0, 0.03);
+		border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+		flex-wrap: wrap;
+	}
+
+	.server-badge {
+		background: rgba(99, 102, 241, 0.1);
+		color: #4f46e5;
+		font-weight: 600;
+	}
+
+	.country-badge {
+		background: rgba(245, 158, 11, 0.1);
+		color: #d97706;
 	}
 </style>
