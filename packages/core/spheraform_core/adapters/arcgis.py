@@ -187,27 +187,24 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         """
         try:
             # Get root catalog
-            logger.info(f"Fetching root catalog from {self.base_url}")
             catalog = await self._request(self.base_url)
-            logger.info(f"Root catalog response keys: {list(catalog.keys())}")
-            logger.info(f"Services at root: {len(catalog.get('services', []))} services")
-            logger.info(f"Folders at root: {len(catalog.get('folders', []))} folders")
+
+            # Log summary at INFO level
+            services_count = len(catalog.get('services', []))
+            folders_count = len(catalog.get('folders', []))
+            logger.info(f"Starting discovery: {services_count} root services, {folders_count} folders")
 
             # Process services at root level
             for service in catalog.get("services", []):
-                logger.info(f"Processing root service: {service.get('name')} ({service.get('type')})")
                 async for dataset in self._process_service(service):
                     yield dataset
 
             # Process folders
             for folder in catalog.get("folders", []):
-                logger.info(f"Processing folder: {folder}")
                 folder_url = f"{self.base_url}/{folder}"
                 folder_catalog = await self._request(folder_url)
-                logger.info(f"Folder catalog has {len(folder_catalog.get('services', []))} services")
 
                 for service in folder_catalog.get("services", []):
-                    logger.info(f"Processing folder service: {service.get('name')} ({service.get('type')})")
                     async for dataset in self._process_service(service):
                         yield dataset
 
@@ -222,7 +219,6 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
         # Only process FeatureServers (MapServers can also work but focus on Feature first)
         if service_type not in ["FeatureServer", "MapServer"]:
-            logger.info(f"Skipping service {service_name} with type {service_type} (not FeatureServer/MapServer)")
             return
 
         service_url = f"{self.base_url}/{service_name}/{service_type}"
@@ -232,10 +228,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         map_name = service_name.split('/')[-1] if service_name else "Unknown"
 
         try:
-            logger.info(f"Fetching service info from {service_url}")
             service_info = await self._request(service_url)
-            logger.info(f"Service info keys: {list(service_info.keys())}")
-            logger.info(f"Service has {len(service_info.get('layers', []))} layers")
 
             # Extract serviceItemId from service info (this is the true unique identifier)
             service_item_id = service_info.get("serviceItemId")
@@ -244,7 +237,6 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             for layer in service_info.get("layers", []):
                 layer_id = layer.get("id")
                 layer_name = layer.get("name")
-                logger.info(f"Processing layer {layer_id}: {layer_name}")
 
                 # Get detailed layer information
                 layer_url = f"{service_url}/{layer_id}"
