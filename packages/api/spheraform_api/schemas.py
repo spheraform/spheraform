@@ -152,6 +152,7 @@ class DownloadRequest(BaseModel):
     format: str = Field("geojson", description="Output format")
     crs: Optional[str] = Field(None, description="Target CRS (e.g., EPSG:4326)")
     merge: bool = Field(False, description="Merge into single file")
+    force_refresh: bool = Field(False, description="Force re-fetch even if cached")
 
 
 class DownloadResponse(BaseModel):

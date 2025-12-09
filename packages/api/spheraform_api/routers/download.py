@@ -50,7 +50,7 @@ async def download_datasets(request: DownloadRequest, db: Session = Depends(get_
     dataset = datasets[0]
 
     # Check if dataset is already cached
-    if dataset.is_cached and not request.geometry:
+    if dataset.is_cached and not request.geometry and not request.force_refresh:
         logger.info(f"Dataset {dataset.id} already cached, returning download URL")
         return DownloadResponse(
             download_url=f"/api/v1/download/{dataset.id}/file",

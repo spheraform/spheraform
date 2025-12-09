@@ -280,16 +280,44 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         feature_count: Optional[int] = None
     ) -> DatasetMetadata:
         """Extract metadata from ArcGIS layer info."""
-        # Parse extent to bbox
+        # Extract source SRID/WKID first (needed for bbox transformation)
+        source_srid = None
+        if "extent" in layer_info and "spatialReference" in layer_info["extent"]:
+            spatial_ref = layer_info["extent"]["spatialReference"]
+            source_srid = spatial_ref.get("wkid") or spatial_ref.get("latestWkid")
+
+        # Parse extent to bbox (in WGS84 for frontend compatibility)
         bbox = None
         if "extent" in layer_info:
             extent = layer_info["extent"]
-            bbox = (
-                extent.get("xmin"),
-                extent.get("ymin"),
-                extent.get("xmax"),
-                extent.get("ymax"),
-            )
+            xmin = extent.get("xmin")
+            ymin = extent.get("ymin")
+            xmax = extent.get("xmax")
+            ymax = extent.get("ymax")
+
+            if all(v is not None for v in [xmin, ymin, xmax, ymax]):
+                # Transform bbox to WGS84 (4326) if source SRID is different
+                if source_srid and source_srid != 4326:
+                    try:
+                        from pyproj import Transformer
+                        # Create transformer from source SRID to WGS84
+                        transformer = Transformer.from_crs(
+                            f"EPSG:{source_srid}",
+                            "EPSG:4326",
+                            always_xy=True
+                        )
+                        # Transform min and max corners
+                        min_lon, min_lat = transformer.transform(xmin, ymin)
+                        max_lon, max_lat = transformer.transform(xmax, ymax)
+                        bbox = (min_lon, min_lat, max_lon, max_lat)
+                    except Exception as e:
+                        # If transformation fails, use original bbox
+                        # (better than no bbox at all)
+                        bbox = (xmin, ymin, xmax, ymax)
+                        logger.warning(f"Failed to transform bbox from EPSG:{source_srid} to EPSG:4326: {e}")
+                else:
+                    # Already in WGS84 or no SRID info
+                    bbox = (xmin, ymin, xmax, ymax)
 
         # Extract geometry type
         geometry_type = layer_info.get("geometryType")
@@ -297,12 +325,6 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         # e.g., "esriGeometryPoint" -> "Point"
         if geometry_type:
             geometry_type = geometry_type.replace("esriGeometry", "")
-
-        # Extract source SRID/WKID
-        source_srid = None
-        if "extent" in layer_info and "spatialReference" in layer_info["extent"]:
-            spatial_ref = layer_info["extent"]["spatialReference"]
-            source_srid = spatial_ref.get("wkid") or spatial_ref.get("latestWkid")
 
         # Extract keywords from description/tags
         keywords = []

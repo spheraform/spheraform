@@ -75,7 +75,9 @@ services:
       DATABASE_URL: postgresql://spheraform:spheraform_dev@postgres:5432/spheraform
     ports:
       - "3000:3000"
-    command: --listen-addresses 0.0.0.0:3000
+    volumes:
+      - ./config:/config
+    command: --webui enable-for-all --listen-addresses 0.0.0.0:3000 --config /config/martin-config.yaml
 
   # Spheraform API
   api:

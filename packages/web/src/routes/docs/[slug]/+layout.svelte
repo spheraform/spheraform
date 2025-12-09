@@ -1,6 +1,4 @@
 <script lang="ts">
-  export let data;
-
   const docs = [
     { slug: 'api', title: 'API Docs' },
     { slug: 'about', title: 'About' },

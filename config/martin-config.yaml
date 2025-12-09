@@ -1,0 +1,25 @@
+# Martin tile server configuration
+# Auto-publish all tables with 'cache_' prefix and improved quality settings
+
+# Connection pool settings
+pool_size: 20
+
+# Auto-discovery settings
+auto_bounds: skip  # Don't auto-calculate bounds for better performance
+auto_publish:
+  tables:
+    # Match all cache tables
+    from_schemas: public
+    id_columns: [id]
+    source_id_format: "{table}"
+    # Include all tables starting with cache_
+    tables: "cache_%"
+    # Tile generation settings for better quality
+    buffer: 256  # Increase buffer to reduce edge artifacts (default is 64)
+    extent: 4096  # Tile extent - higher = more detail (default is 4096)
+    clip_geom: true  # Clip geometries to tile bounds
+    geometry_column: geom
+    srid: 3857
+
+# Default tile generation settings for better quality
+default_srid: 3857
