@@ -178,3 +178,48 @@ class JobStatusResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CrawlJobResponse(BaseModel):
+    """Schema for crawl job status response."""
+
+    id: UUID
+    geoserver_id: UUID
+    status: str
+    progress: Optional[float] = None  # 0-100
+    total_services: Optional[int] = None
+    services_processed: int
+    datasets_discovered: int
+    datasets_new: int
+    datasets_updated: int
+    current_stage: Optional[str] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DownloadJobProgressResponse(BaseModel):
+    """Enhanced schema for download job with detailed progress information."""
+
+    id: UUID
+    dataset_id: UUID
+    status: str
+    progress: Optional[float] = None  # 0-100
+    current_stage: Optional[str] = None
+    total_features: Optional[int] = None
+    features_downloaded: int
+    features_stored: int
+    chunks_completed: int
+    total_chunks: Optional[int] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+    output_path: Optional[str] = None
+
+    class Config:
+        from_attributes = True
