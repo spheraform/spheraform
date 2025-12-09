@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from ..dependencies import get_db
-from ..schemas import ServerCreate, ServerUpdate, ServerResponse
-from spheraform_core.models import Geoserver, HealthStatus, Dataset, ProviderType
+from ..schemas import ServerCreate, ServerUpdate, ServerResponse, CrawlJobResponse
+from spheraform_core.models import Geoserver, HealthStatus, Dataset, ProviderType, CrawlJob, JobStatus
 from spheraform_core.adapters import ArcGISAdapter
 
 router = APIRouter()
@@ -109,12 +109,13 @@ async def delete_server(server_id: UUID, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.post("/{server_id}/crawl")
+@router.post("/{server_id}/crawl", response_model=CrawlJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
     """
-    Trigger a discovery/crawl job for this server.
+    Trigger an async discovery/crawl job for this server.
 
-    This will discover all datasets on the server and add them to the catalogue.
+    Creates a background job that discovers all datasets on the server.
+    Poll GET /api/v1/servers/crawl/{job_id} for progress updates.
     """
     server = db.query(Geoserver).filter(Geoserver.id == server_id).first()
     if not server:
@@ -130,108 +131,71 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
             detail=f"Crawling not yet implemented for {server.provider_type}",
         )
 
-    start_time = datetime.utcnow()
-    datasets_new = 0
-    datasets_updated = 0
+    # Create crawl job
+    job = CrawlJob(
+        geoserver_id=server.id,
+        status=JobStatus.PENDING,
+        current_stage="pending",
+        services_processed=0,
+        datasets_discovered=0,
+        datasets_new=0,
+        datasets_updated=0,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
 
-    try:
-        # Create adapter with connection config and proxy support
-        # Use server's country field for proxy selection
-        async with ArcGISAdapter(
-            base_url=server.base_url,
-            connection_config=server.connection_config,
-            country_hint=server.country,
-        ) as adapter:
-            # Discover datasets
-            async for dataset_meta in adapter.discover_datasets():
-                # Check if dataset already exists (using access_url as unique identifier)
-                existing = (
-                    db.query(Dataset)
-                    .filter(
-                        Dataset.geoserver_id == server.id,
-                        Dataset.access_url == dataset_meta.access_url,
-                    )
-                    .first()
-                )
+    logger.info(f"Created crawl job {job.id} for server {server_id}")
 
-                # Convert bbox tuple to WKT POLYGON and transform to EPSG:4326
-                bbox_geometry = None
-                if dataset_meta.bbox and dataset_meta.source_srid:
-                    minx, miny, maxx, maxy = dataset_meta.bbox
-                    bbox_wkt = f"POLYGON(({minx} {miny},{maxx} {miny},{maxx} {maxy},{minx} {maxy},{minx} {miny}))"
-                    # Transform from source SRID to EPSG:4326 using PostGIS
-                    bbox_geometry = func.ST_Transform(
-                        func.ST_GeomFromText(bbox_wkt, dataset_meta.source_srid),
-                        4326
-                    )
+    return CrawlJobResponse(
+        id=job.id,
+        geoserver_id=job.geoserver_id,
+        status=job.status.value,
+        progress=0.0,
+        total_services=job.total_services,
+        services_processed=job.services_processed,
+        datasets_discovered=job.datasets_discovered,
+        datasets_new=job.datasets_new,
+        datasets_updated=job.datasets_updated,
+        current_stage=job.current_stage,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+    )
 
-                if existing:
-                    # Update existing dataset
-                    existing.name = dataset_meta.name
-                    existing.description = dataset_meta.description
-                    existing.access_url = dataset_meta.access_url
-                    existing.feature_count = dataset_meta.feature_count
-                    existing.bbox = bbox_geometry
-                    existing.keywords = dataset_meta.keywords
-                    existing.updated_at = datetime.utcnow()
-                    # Update enriched metadata
-                    existing.service_item_id = dataset_meta.service_item_id
-                    existing.geometry_type = dataset_meta.geometry_type
-                    existing.source_srid = dataset_meta.source_srid
-                    existing.last_edit_date = dataset_meta.last_edit_date
-                    existing.themes = dataset_meta.themes
-                    datasets_updated += 1
-                else:
-                    # Create new dataset
-                    new_dataset = Dataset(
-                        geoserver_id=server.id,
-                        external_id=dataset_meta.external_id,
-                        name=dataset_meta.name,
-                        description=dataset_meta.description,
-                        access_url=dataset_meta.access_url,
-                        feature_count=dataset_meta.feature_count,
-                        bbox=bbox_geometry,
-                        keywords=dataset_meta.keywords,
-                        is_active=True,
-                        # Enriched metadata
-                        service_item_id=dataset_meta.service_item_id,
-                        geometry_type=dataset_meta.geometry_type,
-                        source_srid=dataset_meta.source_srid,
-                        last_edit_date=dataset_meta.last_edit_date,
-                        themes=dataset_meta.themes,
-                    )
-                    db.add(new_dataset)
-                    datasets_new += 1
 
-            # Update server metadata
-            server.last_crawl = datetime.utcnow()
-            server.dataset_count = db.query(Dataset).filter(Dataset.geoserver_id == server.id).count()
-            server.active_dataset_count = (
-                db.query(Dataset)
-                .filter(Dataset.geoserver_id == server.id, Dataset.is_active == True)
-                .count()
-            )
-            server.health_status = HealthStatus.HEALTHY
-
-            db.commit()
-
-            duration = (datetime.utcnow() - start_time).total_seconds()
-
-            return {
-                "server_id": server_id,
-                "datasets_discovered": datasets_new + datasets_updated,
-                "datasets_new": datasets_new,
-                "datasets_updated": datasets_updated,
-                "crawl_duration_seconds": duration,
-            }
-
-    except Exception as e:
-        server.health_status = HealthStatus.OFFLINE
-        db.commit()
+@router.get("/crawl/{job_id}", response_model=CrawlJobResponse)
+async def get_crawl_status(job_id: UUID, db: Session = Depends(get_db)):
+    """Get the status and progress of a crawl job."""
+    job = db.query(CrawlJob).filter(CrawlJob.id == job_id).first()
+    if not job:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Crawl failed: {str(e)}",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Crawl job {job_id} not found",
         )
+
+    # Calculate progress
+    progress = None
+    if job.total_services and job.total_services > 0:
+        progress = (job.services_processed / job.total_services) * 100
+
+    return CrawlJobResponse(
+        id=job.id,
+        geoserver_id=job.geoserver_id,
+        status=job.status.value,
+        progress=progress,
+        total_services=job.total_services,
+        services_processed=job.services_processed,
+        datasets_discovered=job.datasets_discovered,
+        datasets_new=job.datasets_new,
+        datasets_updated=job.datasets_updated,
+        current_stage=job.current_stage,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+    )
 
 
 @router.get("/{server_id}/health")

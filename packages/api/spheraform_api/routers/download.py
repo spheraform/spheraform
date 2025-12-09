@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db
-from ..schemas import DownloadRequest, DownloadResponse, JobStatusResponse
+from ..schemas import DownloadRequest, DownloadResponse, JobStatusResponse, DownloadJobProgressResponse
 from spheraform_core.models import Dataset, DownloadJob, JobStatus, Geoserver, ProviderType, DownloadStrategy
 from spheraform_core.adapters import ArcGISAdapter
 
@@ -109,9 +109,9 @@ async def download_datasets(request: DownloadRequest, db: Session = Depends(get_
         )
 
 
-@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
+@router.get("/jobs/{job_id}", response_model=DownloadJobProgressResponse)
 async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
-    """Get the status of a download job."""
+    """Get detailed status and progress of a download job."""
     job = db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
     if not job:
         raise HTTPException(
@@ -119,15 +119,33 @@ async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
             detail=f"Job {job_id} not found",
         )
 
-    # Calculate progress
+    # Calculate stage-based progress
     progress = None
-    if job.total_chunks:
+    if job.current_stage == "downloading" and job.total_features:
+        progress = (job.features_downloaded / job.total_features) * 70  # 70% for download
+    elif job.current_stage == "storing" and job.total_features:
+        base = 70.0
+        store_progress = (job.features_stored / job.total_features) * 25  # 25% for storing
+        progress = base + store_progress
+    elif job.current_stage == "indexing":
+        progress = 95.0
+    elif job.status == JobStatus.COMPLETED:
+        progress = 100.0
+    elif job.total_chunks and job.total_chunks > 0:
+        # Fallback to chunk-based progress
         progress = (job.chunks_completed / job.total_chunks) * 100
 
-    return JobStatusResponse(
+    return DownloadJobProgressResponse(
         id=job.id,
+        dataset_id=job.dataset_id,
         status=job.status.value,
         progress=progress,
+        current_stage=job.current_stage,
+        total_features=job.total_features,
+        features_downloaded=job.features_downloaded,
+        features_stored=job.features_stored,
+        chunks_completed=job.chunks_completed,
+        total_chunks=job.total_chunks,
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,
