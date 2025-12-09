@@ -30,15 +30,15 @@ LOGGING_CONFIG = {
     },
     "loggers": {
         # root logger
-        "": {"handlers": ["stdout"], "level": "DEBUG"},
+        "": {"handlers": ["stdout"], "level": "INFO"},
         # uvicorn loggers
         "uvicorn": {"handlers": ["stdout"], "level": "INFO", "propagate": False},
         "uvicorn.error": {"handlers": ["stdout"], "level": "INFO", "propagate": False},
         "uvicorn.access": {"handlers": ["stdout"], "level": "INFO", "propagate": False},
         # Capture logs from core adapters and services
-        "spheraform_core": {"handlers": ["stdout"], "level": "DEBUG", "propagate": False},
+        "spheraform_core": {"handlers": ["stdout"], "level": "INFO", "propagate": False},
         # More specific logger for the ArcGIS adapter to ensure messages propagate to root
-        "spheraform_core.adapters.arcgis": {"handlers": ["stdout"], "level": "DEBUG", "propagate": True},
+        "spheraform_core.adapters.arcgis": {"handlers": ["stdout"], "level": "INFO", "propagate": True},
     },
 }
 

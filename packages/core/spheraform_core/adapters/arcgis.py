@@ -114,17 +114,6 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             # Decode and parse JSON
             return json.loads(content.decode('utf-8'))
         except Exception as e:
-            # Log response details for debugging
-            if hasattr(e, 'response') and e.response is not None:
-                logger.debug(f"Request failed for {url}: {e}")
-                logger.debug(f"Response status: {e.response.status_code}")
-                # Try to get response body, but handle if it's compressed
-                try:
-                    logger.debug(f"Response body (first 500 chars): {e.response.text[:500]}")
-                except:
-                    logger.debug(f"Response body (raw, first 100 bytes): {e.response.content[:100]}")
-            else:
-                logger.debug(f"Request failed for {url}: {e}")
             raise
 
     async def probe_capabilities(self) -> ServerCapabilities:
@@ -566,8 +555,6 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 all_features.extend(features)
                 offset += len(features)
 
-                logger.debug(f"Downloaded {offset}/{total_count} features from {layer_url}")
-
             # Write complete GeoJSON
             import json
             result_geojson = {
@@ -680,8 +667,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
             return None
 
-        except Exception as e:
-            logger.debug(f"Error getting OID range: {e}")
+        except Exception:
             return None
 
     async def fetch_by_oid_range(
@@ -758,7 +744,6 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             oid_range = await self.get_oid_range_from_url(layer_url, oid_field)
             if not oid_range:
                 # Fallback to paged download
-                logger.debug("Could not get OID range, falling back to paged download")
                 return await self.download_paged(layer_url, output_path)
 
             min_oid, max_oid = oid_range
@@ -849,6 +834,5 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
             return None
 
-        except Exception as e:
-            logger.debug(f"Error getting OID range: {e}")
+        except Exception:
             return None
