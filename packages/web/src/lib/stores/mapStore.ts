@@ -66,6 +66,8 @@ function createMapStore() {
 					type: 'line',
 					source: sourceId,
 					'source-layer': cacheTable,
+					minzoom: 0,
+					maxzoom: 22,
 					paint: {
 						'line-color': color,
 						'line-width': 2
@@ -78,6 +80,8 @@ function createMapStore() {
 					type: 'fill',
 					source: sourceId,
 					'source-layer': cacheTable,
+					minzoom: 0,
+					maxzoom: 22,
 					paint: {
 						'fill-color': color,
 						'fill-opacity': 0.3
