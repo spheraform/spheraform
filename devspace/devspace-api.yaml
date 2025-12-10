@@ -5,6 +5,7 @@ images:
   api:
     image: api
     dockerfile: ../packages/api/Dockerfile
+    context: .
 
 deployments:
   api:

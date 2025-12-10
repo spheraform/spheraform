@@ -7,6 +7,7 @@ images:
   web:
     image: web
     dockerfile: packages/web/Dockerfile
+    context: .
 
 # This is a list of `deployments` that DevSpace can create for this project
 deployments:
