@@ -91,7 +91,7 @@ export function formatJobProgress(job: any): string {
     message = `${job.datasets_discovered} datasets`;
     // Don't show service estimate if it's clearly wrong (no progress yet)
     if (job.total_services && job.datasets_discovered > 0) {
-      message += ` (~${job.services_processed || 0}/${job.total_services} svcs)`;
+      message += `\n(~${job.services_processed || 0}/${job.total_services} services)`;
     }
   }
   // Download job progress
