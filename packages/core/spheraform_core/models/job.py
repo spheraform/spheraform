@@ -79,6 +79,14 @@ class DownloadJob(Base, UUIDMixin, TimestampMixin):
     total_chunks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     chunks_completed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    # Detailed progress tracking
+    current_stage: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # "initializing", "downloading", "storing", "indexing", "complete"
+    features_downloaded: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    features_stored: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_features: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     # Timing
     started_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
@@ -219,3 +227,51 @@ class ExportJob(Base, UUIDMixin, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<ExportJob(format='{self.format}', status='{self.status}', datasets={len(self.dataset_ids)})>"
+
+
+class CrawlJob(Base, UUIDMixin, TimestampMixin):
+    """
+    Background crawl jobs for server discovery.
+
+    Tracks progress of dataset discovery on geoservers.
+    """
+
+    __tablename__ = "crawl_jobs"
+
+    # Server being crawled
+    geoserver_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("geoservers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Job status
+    status: Mapped[JobStatus] = mapped_column(
+        SQLEnum(JobStatus, name="job_status", values_callable=lambda x: [e.value for e in x]),
+        default=JobStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+
+    # Progress tracking
+    total_services: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    services_processed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    datasets_discovered: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    datasets_new: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    datasets_updated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Current stage
+    current_stage: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # "discovering", "counting_services", "processing_datasets", "finalizing", "complete"
+
+    # Timing
+    started_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    # Error tracking
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<CrawlJob(geoserver_id={self.geoserver_id}, status='{self.status}', progress={self.services_processed}/{self.total_services})>"

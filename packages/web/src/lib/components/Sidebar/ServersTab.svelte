@@ -5,6 +5,7 @@
 	import ConfirmModal from '$lib/components/Modals/ConfirmModal.svelte';
 	import InfoModal from '$lib/components/Modals/InfoModal.svelte';
 	import InfoDetailModal from '$lib/components/Modals/InfoDetailModal.svelte';
+	import { pollJobStatus, formatJobProgress } from '$lib/utils/polling';
 
 	interface Server {
 		id: string;
@@ -20,6 +21,8 @@
 		loading?: boolean;
 		crawling?: boolean;
 		datasets?: any[];
+		crawlJobId?: string;
+		crawlJobStatus?: any;
 	}
 
 	export let sidebarWidth: number = 400;
@@ -119,18 +122,166 @@
 	let detailModalTitle = '';
 	let detailModalRows: Array<{ label: string; value: string; link?: boolean }> = [];
 
-	onMount(async () => {
+	async function loadServers() {
 		try {
 			const response = await fetch('/api/v1/servers');
 			if (!response.ok) throw new Error('Failed to fetch servers');
 			const list = await response.json();
-			servers = list.map((s: any) => ({ ...s, expanded: false, loading: false, crawling: false }));
+
+			// Preserve existing UI state (expanded, loading, crawling) when reloading
+			const stateMap = new Map(servers.map(s => [s.id, {
+				expanded: s.expanded,
+				loading: s.loading,
+				crawling: s.crawling,
+				crawlJobId: s.crawlJobId,
+				crawlJobStatus: s.crawlJobStatus,
+				datasets: s.datasets
+			}]));
+
+			servers = list.map((s: any) => {
+				const existingState = stateMap.get(s.id);
+				return {
+					...s,
+					expanded: existingState?.expanded || false,
+					loading: existingState?.loading || false,
+					crawling: existingState?.crawling || false,
+					crawlJobId: existingState?.crawlJobId,
+					crawlJobStatus: existingState?.crawlJobStatus,
+					datasets: existingState?.datasets
+				};
+			});
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Unknown error';
+			throw e;
+		}
+	}
+
+	onMount(async () => {
+		try {
+			await loadServers();
+
+			// Resume any in-progress crawl jobs
+			await resumeCrawlJobs();
+
+			// Resume any in-progress download jobs
+			await resumeDownloadJobs();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Unknown error';
 		} finally {
 			loading = false;
 		}
 	});
+
+	async function resumeCrawlJobs() {
+		// Check each server for running/pending crawl jobs
+		for (const server of servers) {
+			const serverId = server.id; // Capture server ID to avoid closure issues
+			try {
+				const res = await fetch(`/api/v1/servers/${serverId}/crawl/latest`);
+				if (res.ok) {
+					const job = await res.json();
+					if (job && (job.status === 'running' || job.status === 'pending')) {
+						// Resume polling this job
+						servers = servers.map(s =>
+							s.id === serverId ? { ...s, crawling: true, crawlJobId: job.id, crawlJobStatus: job } : s
+						);
+
+						// Start polling
+						pollJobStatus(
+							`/api/v1/servers/crawl/${job.id}`,
+							(progressJob) => {
+								servers = servers.map(s =>
+									s.id === serverId ? { ...s, crawlJobStatus: progressJob } : s
+								);
+							},
+							{ interval: 2500, timeout: 600000 }
+						).then((finalJob) => {
+							// Job completed
+							if (finalJob.status === 'completed') {
+								const srv = servers.find(s => s.id === serverId);
+								if (srv?.expanded) {
+									refreshServerDatasets(serverId);
+								}
+							} else if (finalJob.status === 'failed') {
+								console.warn(`Crawl job ${job.id} failed:`, finalJob.error);
+							}
+						}).catch((error) => {
+							// Reset UI state on polling errors (e.g., job not found after restart)
+							console.warn(`Polling failed for crawl job ${job.id}:`, error);
+							servers = servers.map(s =>
+								s.id === serverId ? { ...s, crawling: false, crawlJobId: undefined, crawlJobStatus: undefined } : s
+							);
+						}).finally(() => {
+							// Always clean up crawling state when done
+							servers = servers.map(s =>
+								s.id === serverId ? { ...s, crawling: false, crawlJobId: undefined } : s
+							);
+						});
+					}
+				}
+			} catch {
+				// Ignore errors checking for jobs
+			}
+		}
+	}
+
+	async function resumeDownloadJobs() {
+		// Check all datasets across all servers for running/pending download jobs
+		for (const server of servers) {
+			if (!server.datasets) continue;
+
+			for (const dataset of server.datasets) {
+				const datasetId = dataset.id;
+				try {
+					const res = await fetch(`/api/v1/download/datasets/${datasetId}/latest`);
+					if (res.ok) {
+						const job = await res.json();
+						if (job && (job.status === 'running' || job.status === 'pending')) {
+							// Resume polling this job
+							fetchingDatasets[datasetId] = {
+								progress: job.progress || 0,
+								stage: job.current_stage || 'processing',
+								jobId: job.id
+							};
+							fetchingDatasets = { ...fetchingDatasets };
+
+							// Start polling
+							pollJobStatus(
+								`/api/v1/download/jobs/${job.id}`,
+								(progressJob) => {
+									fetchingDatasets[datasetId] = {
+										progress: progressJob.progress || 0,
+										stage: progressJob.current_stage || 'processing',
+										jobId: job.id
+									};
+									fetchingDatasets = { ...fetchingDatasets };
+								},
+								{ interval: 2500, timeout: 600000 }
+							).then((finalJob) => {
+								// Job completed
+								if (finalJob.status === 'completed') {
+									console.log(`Download job ${job.id} completed for dataset ${datasetId}`);
+									// Refresh datasets
+									loadDatasets(server);
+								} else if (finalJob.status === 'failed') {
+									console.warn(`Download job ${job.id} failed:`, finalJob.error);
+								}
+							}).catch((error) => {
+								// Reset UI state on polling errors
+								console.warn(`Polling failed for download job ${job.id}:`, error);
+							}).finally(() => {
+								// Always clean up loading state when done
+								delete fetchingDatasets[datasetId];
+								fetchingDatasets = { ...fetchingDatasets };
+							});
+						}
+					}
+				} catch {
+					// Ignore errors checking for jobs
+				}
+			}
+		}
+	}
 
 	function addServer() {
 		// Open modal instead of using prompt()
@@ -162,16 +313,106 @@
 
 	async function crawlServer(serverId: string) {
 		try {
+			// Set server as crawling
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, crawling: true, crawlJobStatus: null } : s
+			);
+
+			// Start crawl job
 			const response = await fetch(`/api/v1/servers/${serverId}/crawl`, { method: 'POST' });
-			if (!response.ok) throw new Error('Failed to crawl server');
-			infoMessage = 'Crawl started. This may take a while.';
-			showInfoModal = true;
+			if (!response.ok) throw new Error('Failed to start crawl');
+
+			const job = await response.json();
+			console.log('Crawl job started:', job);
+
+			// Store job ID and start polling
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, crawlJobId: job.id, crawlJobStatus: job } : s
+			);
+
+			// Poll for progress
+			try {
+				const finalJob = await pollJobStatus(
+					`/api/v1/servers/crawl/${job.id}`,
+					(progressJob) => {
+						// Update UI with progress
+						servers = servers.map(s =>
+							s.id === serverId ? { ...s, crawlJobStatus: progressJob } : s
+						);
+					},
+					{ interval: 2500, timeout: 600000 }  // 10 minute timeout for large servers
+				);
+
+				// Job completed - refresh dataset list
+				if (finalJob.status === 'completed') {
+					infoMessage = `Crawl complete: ${finalJob.datasets_new} new, ${finalJob.datasets_updated} updated`;
+					showInfoModal = true;
+
+					// Refresh datasets for this server if expanded
+					const server = servers.find(s => s.id === serverId);
+					if (server?.expanded) {
+						await refreshServerDatasets(serverId);
+					}
+
+					// Reload servers list to update last_crawl timestamp
+					await loadServers();
+				} else if (finalJob.status === 'failed') {
+					infoMessage = `Crawl failed: ${finalJob.error}`;
+					showInfoModal = true;
+				}
+			} finally {
+				// Clear crawling state
+				servers = servers.map(s =>
+					s.id === serverId ? { ...s, crawling: false, crawlJobId: undefined, crawlJobStatus: undefined } : s
+				);
+			}
 		} catch (e) {
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, crawling: false } : s
+			);
 			infoMessage = 'Error crawling server: ' + (e instanceof Error ? e.message : 'Unknown error');
 			showInfoModal = true;
 		}
+	}
 
-    }
+	async function cancelCrawl(serverId: string) {
+		const server = servers.find(s => s.id === serverId);
+		if (!server?.crawlJobId) return;
+
+		try {
+			// Cancel the job on backend
+			const res = await fetch(`/api/v1/servers/crawl/${server.crawlJobId}/cancel`, {
+				method: 'POST'
+			});
+
+			if (!res.ok) throw new Error('Failed to cancel crawl');
+
+			// Reset UI state immediately
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, crawling: false, crawlJobId: undefined, crawlJobStatus: null } : s
+			);
+
+			infoMessage = 'Crawl cancelled';
+			showInfoModal = true;
+		} catch (err) {
+			infoMessage = 'Error cancelling crawl: ' + (err instanceof Error ? err.message : String(err));
+			showInfoModal = true;
+		}
+	}
+
+	async function refreshServerDatasets(serverId: string) {
+		try {
+			const res = await fetch(`/api/v1/datasets?geoserver_id=${serverId}&limit=1000`);
+			if (!res.ok) throw new Error('Failed to refresh datasets');
+			const datasets = await res.json();
+
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, datasets } : s
+			);
+		} catch (err) {
+			console.error('Failed to refresh datasets:', err);
+		}
+	}
 
 		function openEdit(server: Server) {
 			serverBeingEdited = server;
@@ -237,11 +478,34 @@
 			servers = [...servers];
 		}
 
+		async function cancelFetch(datasetId: string) {
+			const fetchInfo = fetchingDatasets[datasetId];
+			if (!fetchInfo?.jobId) return;
+
+			try {
+				const res = await fetch(`/api/v1/download/jobs/${fetchInfo.jobId}/cancel`, {
+					method: 'POST'
+				});
+
+				if (!res.ok) throw new Error('Failed to cancel download');
+
+				console.log(`Download job ${fetchInfo.jobId} cancelled`);
+
+				// Reset UI state immediately
+				delete fetchingDatasets[datasetId];
+				fetchingDatasets = { ...fetchingDatasets };
+			} catch (err) {
+				console.error('Error cancelling download:', err);
+				infoMessage = 'Error cancelling: ' + (err instanceof Error ? err.message : String(err));
+				showInfoModal = true;
+			}
+		}
+
 		async function fetchDataset(dataset: any, e?: Event) {
 			e && e.stopPropagation();
 
-			// Set loading state
-			fetchingDatasets[dataset.id] = true;
+			// Set loading state with initial progress
+			fetchingDatasets[dataset.id] = { progress: 0, stage: 'starting' };
 			fetchingDatasets = { ...fetchingDatasets };
 
 			try {
@@ -264,12 +528,44 @@
 				console.log('Download job response:', data);
 
 				if (data.job_id) {
-					// Job was created, need to poll for completion
-					infoMessage = `Download job started for ${dataset.name}. Job ID: ${data.job_id}. Note: Background worker may not be running yet.`;
-					showInfoModal = true;
+					// Job was created, poll for progress
+					console.log(`Polling download job ${data.job_id}...`);
+
+					try {
+						const finalJob = await pollJobStatus(
+							`/api/v1/download/jobs/${data.job_id}`,
+							(progressJob) => {
+								// Update UI with progress
+								fetchingDatasets[dataset.id] = {
+									progress: progressJob.progress || 0,
+									stage: progressJob.current_stage || 'processing',
+									jobId: data.job_id
+								};
+								fetchingDatasets = { ...fetchingDatasets };
+							},
+							{ interval: 2500, timeout: 600000 }
+						);
+
+						// Job completed
+						if (finalJob.status === 'completed') {
+							infoMessage = `${dataset.name} cached successfully!`;
+							showInfoModal = true;
+
+							// Refresh the server's datasets to update cached status
+							const server = servers.find(s => s.datasets?.some(d => d.id === dataset.id));
+							if (server) {
+								await loadDatasets(server);
+							}
+						} else if (finalJob.status === 'failed') {
+							throw new Error(finalJob.error || 'Download job failed');
+						}
+					} catch (pollErr) {
+						console.error('Error polling download job:', pollErr);
+						throw pollErr;
+					}
 				} else if (data.download_url) {
-					// Direct download URL returned - success!
-					infoMessage = `${dataset.name} cached successfully!`;
+					// Direct download URL returned - already cached
+					infoMessage = `${dataset.name} already cached!`;
 					showInfoModal = true;
 					// Refresh the server's datasets to update cached status
 					const server = servers.find(s => s.datasets?.some(d => d.id === dataset.id));
@@ -400,7 +696,7 @@
 			{ label: 'Type', value: server.provider_type },
 			{ label: 'Country', value: server.country || 'N/A' },
 			{ label: 'URL', value: server.base_url, link: true },
-			{ label: 'Datasets', value: String(server.datasets?.length || 0) },
+			{ label: 'Datasets', value: String(server.dataset_count || 0) },
 			{ label: 'Status', value: server.health_status || 'Unknown' },
 			{ label: 'Last Crawl', value: server.last_crawl ? new Date(server.last_crawl).toLocaleString() : 'Never' }
 		];
@@ -533,7 +829,7 @@
 					<div class="server-header">
 						<div class="server-info">
 							<h4>{server.name}</h4>
-							<button class="icon-btn server-info-btn" on:click|stopPropagation={() => showServerDetails(server)} title="View Details">
+							<button class="icon-btn server-info-btn tooltip-trigger" on:click|stopPropagation={() => showServerDetails(server)} data-tooltip="View Details">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<circle cx="12" cy="12" r="10"></circle>
 									<line x1="12" y1="16" x2="12" y2="12"></line>
@@ -542,18 +838,34 @@
 							</button>
 						</div>
 						<div class="server-actions">
-							<button class="icon-btn crawl-btn" on:click|stopPropagation={() => crawlServer(server.id)} disabled={server.crawling} title={server.crawling ? 'Crawling...' : 'Crawl'}>
-								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<polygon points="5 3 19 12 5 21 5 3"></polygon>
-								</svg>
-							</button>
-							<button class="icon-btn edit-btn" on:click|stopPropagation={() => openEdit(server)} title="Edit">
+							{#if server.crawling}
+								<button
+									class="icon-btn cancel-btn tooltip-trigger"
+									on:click|stopPropagation={() => cancelCrawl(server.id)}
+									data-tooltip={server.crawlJobStatus ? formatJobProgress(server.crawlJobStatus) : 'Starting crawl...'}>
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<circle cx="12" cy="12" r="10"></circle>
+										<line x1="15" y1="9" x2="9" y2="15"></line>
+										<line x1="9" y1="9" x2="15" y2="15"></line>
+									</svg>
+								</button>
+							{:else}
+								<button
+									class="icon-btn crawl-btn tooltip-trigger"
+									on:click|stopPropagation={() => crawlServer(server.id)}
+									data-tooltip="Crawl server for datasets">
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<polygon points="5 3 19 12 5 21 5 3"></polygon>
+									</svg>
+								</button>
+							{/if}
+							<button class="icon-btn edit-btn tooltip-trigger" on:click|stopPropagation={() => openEdit(server)} data-tooltip="Edit server">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
 									<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
 								</svg>
 							</button>
-							<button class="icon-btn delete-btn" on:click|stopPropagation={() => confirmDelete(server)} title="Delete">
+							<button class="icon-btn delete-btn tooltip-trigger" on:click|stopPropagation={() => confirmDelete(server)} data-tooltip="Delete server">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<polyline points="3 6 5 6 21 6"></polyline>
 									<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -597,36 +909,42 @@
 													</div>
 												</div>
 												<div class="dataset-actions">
-													<button class="icon-btn info-btn" on:click|stopPropagation={() => showDatasetDetails(dataset)} title="View Details">
+													<button class="icon-btn info-btn tooltip-trigger" on:click|stopPropagation={() => showDatasetDetails(dataset)} data-tooltip="View Details">
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 															<circle cx="12" cy="12" r="10"></circle>
 															<line x1="12" y1="16" x2="12" y2="12"></line>
 															<line x1="12" y1="8" x2="12.01" y2="8"></line>
 														</svg>
 													</button>
-													<button
-														class="icon-btn fetch-btn"
-														class:loading={fetchingDatasets[dataset.id]}
-														on:click|stopPropagation={(e) => fetchDataset(dataset, e)}
-														disabled={fetchingDatasets[dataset.id]}
-														title={fetchingDatasets[dataset.id] ? "Fetching..." : "Fetch & Cache"}
-													>
-														{#if fetchingDatasets[dataset.id]}
-															<svg class="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-																<circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
-																<path d="M12 2 A10 10 0 0 1 22 12" stroke-linecap="round"></path>
+													{#if fetchingDatasets[dataset.id]}
+														<button
+															class="icon-btn cancel-btn tooltip-trigger"
+															on:click|stopPropagation={() => cancelFetch(dataset.id)}
+															data-tooltip={fetchingDatasets[dataset.id]
+																? `${fetchingDatasets[dataset.id].stage || 'fetching'}: ${Math.round(fetchingDatasets[dataset.id].progress || 0)}%`
+																: "Cancel"}
+														>
+															<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+																<line x1="18" y1="6" x2="6" y2="18"></line>
+																<line x1="6" y1="6" x2="18" y2="18"></line>
 															</svg>
-														{:else}
+														</button>
+													{:else}
+														<button
+															class="icon-btn fetch-btn tooltip-trigger"
+															on:click|stopPropagation={(e) => fetchDataset(dataset, e)}
+															data-tooltip="Fetch & Cache"
+														>
 															<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 																<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
 															</svg>
-														{/if}
-													</button>
+														</button>
+													{/if}
 													<button
-														class="icon-btn map-btn"
+														class="icon-btn map-btn tooltip-trigger"
 														on:click|stopPropagation={(e) => showOnMap(dataset, e)}
 														disabled={!dataset.is_cached}
-														title={dataset.is_cached ? 'Show on Map' : 'Cache dataset first'}
+														data-tooltip={dataset.is_cached ? 'Show on Map' : 'Cache dataset first'}
 													>
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 															<path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"></path>
@@ -635,10 +953,10 @@
 														</svg>
 													</button>
 													<button
-														class="icon-btn download-btn"
+														class="icon-btn download-btn tooltip-trigger"
 														on:click|stopPropagation={(e) => downloadDatasetFile(dataset, e)}
 														disabled={!dataset.is_cached}
-														title={dataset.is_cached ? 'Download File' : 'Cache dataset first'}
+														data-tooltip={dataset.is_cached ? 'Download File' : 'Cache dataset first'}
 													>
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 															<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -810,6 +1128,16 @@
 	.delete-btn {
 		border-color: #fca5a5;
 		color: #dc2626;
+	}
+
+	.cancel-btn {
+		border-color: #fed7aa;
+		color: #ea580c;
+	}
+
+	.cancel-btn:hover:not(:disabled) {
+		background: #fff7ed;
+		border-color: #fb923c;
 	}
 
 	.delete-btn:hover {
@@ -1043,6 +1371,51 @@
 	.sort-direction-btn:hover {
 		background: rgba(0, 0, 0, 0.05);
 		border-color: rgba(0, 0, 0, 0.25);
+	}
+
+	/* Custom Tooltips */
+	.tooltip-trigger {
+		position: relative;
+	}
+
+	.tooltip-trigger::before {
+		content: attr(data-tooltip);
+		position: absolute;
+		bottom: calc(100% + 8px);
+		left: 50%;
+		transform: translateX(-50%);
+		padding: 8px 12px;
+		background: rgba(0, 0, 0, 0.9);
+		color: white;
+		font-size: 13px;
+		font-weight: 500;
+		line-height: 1.4;
+		border-radius: 6px;
+		white-space: nowrap;
+		pointer-events: none;
+		opacity: 0;
+		transition: opacity 0.2s ease-in-out;
+		z-index: 1000;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	}
+
+	.tooltip-trigger::after {
+		content: '';
+		position: absolute;
+		bottom: calc(100% + 2px);
+		left: 50%;
+		transform: translateX(-50%);
+		border: 6px solid transparent;
+		border-top-color: rgba(0, 0, 0, 0.9);
+		pointer-events: none;
+		opacity: 0;
+		transition: opacity 0.2s ease-in-out;
+		z-index: 1000;
+	}
+
+	.tooltip-trigger:hover::before,
+	.tooltip-trigger:hover::after {
+		opacity: 1;
 	}
 
 	/* Grid View */

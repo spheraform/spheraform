@@ -11,7 +11,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from spheraform_core.models import Dataset, Geoserver, DownloadStrategy
+from spheraform_core.models import Dataset, Geoserver, DownloadStrategy, DownloadJob, JobStatus
 from spheraform_core.adapters import ArcGISAdapter
 
 logger = logging.getLogger("gunicorn.error")
@@ -28,6 +28,7 @@ class DownloadService:
         dataset_id: UUID,
         geometry: Optional[dict] = None,
         format: str = "geojson",
+        job_id: Optional[UUID] = None,
     ) -> dict:
         """
         Download dataset and cache it in PostGIS.
@@ -118,6 +119,7 @@ class DownloadService:
                     await self._store_in_postgis(
                         cache_table=cache_table,
                         geojson_data=geojson_data,
+                        job_id=job_id,
                     )
 
                     # Update dataset metadata
@@ -152,13 +154,15 @@ class DownloadService:
         self,
         cache_table: str,
         geojson_data: dict,
+        job_id: Optional[UUID] = None,
     ) -> None:
         """
-        Store GeoJSON data in PostGIS table.
+        Store GeoJSON data in PostGIS table with progress tracking.
 
         Args:
             cache_table: Name of the cache table
             geojson_data: GeoJSON FeatureCollection
+            job_id: Optional DownloadJob ID for progress updates
         """
         # Drop table if it exists
         self.db.execute(text(f"DROP TABLE IF EXISTS {cache_table}"))
@@ -173,32 +177,79 @@ class DownloadService:
         """
         self.db.execute(text(create_table_sql))
 
-        # Insert features
+        # Insert features with progress tracking
         features = geojson_data.get("features", [])
-        logger.info(f"Inserting {len(features)} features into {cache_table}")
+        total_features = len(features)
 
-        for feature in features:
-            geometry_json = json.dumps(feature.get("geometry"))
-            properties_json = json.dumps(feature.get("properties", {}))
+        logger.info(f"Storing {total_features:,} features in {cache_table}")
 
-            # Transform from 4326 (WGS84) to 3857 (Web Mercator) for Martin
-            insert_sql = f"""
-            INSERT INTO {cache_table} (geom, properties)
-            VALUES (
-                ST_Transform(ST_GeomFromGeoJSON(:geometry), 3857),
-                CAST(:properties AS jsonb)
-            )
-            """
-            self.db.execute(
-                text(insert_sql),
-                {"geometry": geometry_json, "properties": properties_json}
-            )
+        # Update job stage
+        if job_id:
+            job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+            if job:
+                job.current_stage = "storing"
+                job.total_features = total_features
+                self.db.commit()
+
+        # Insert in batches for better progress feedback
+        batch_size = 1000
+        for i in range(0, total_features, batch_size):
+            # Check if job was cancelled
+            if job_id:
+                job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+                if job and job.status == JobStatus.CANCELLED:
+                    logger.info(f"Download job {job_id} was cancelled, stopping storage")
+                    # Clean up partial table
+                    self.db.execute(text(f"DROP TABLE IF EXISTS {cache_table}"))
+                    self.db.commit()
+                    return
+
+            batch = features[i:i+batch_size]
+
+            for feature in batch:
+                geometry_json = json.dumps(feature.get("geometry"))
+                properties_json = json.dumps(feature.get("properties", {}))
+
+                # Transform from 4326 (WGS84) to 3857 (Web Mercator) for Martin
+                insert_sql = f"""
+                INSERT INTO {cache_table} (geom, properties)
+                VALUES (
+                    ST_Transform(ST_GeomFromGeoJSON(:geometry), 3857),
+                    CAST(:properties AS jsonb)
+                )
+                """
+                self.db.execute(
+                    text(insert_sql),
+                    {"geometry": geometry_json, "properties": properties_json}
+                )
+
+            # Update progress after each batch
+            if job_id:
+                job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+                if job:
+                    job.features_stored = min(i + batch_size, total_features)
+                    self.db.commit()
+
+            # Log milestone progress
+            if (i + batch_size) % 10000 == 0 or (i + batch_size) >= total_features:
+                progress_pct = ((i + batch_size) / total_features) * 100
+                logger.info(
+                    f"Storage progress: {progress_pct:.1f}% "
+                    f"({min(i + batch_size, total_features):,}/{total_features:,} features)"
+                )
 
         # Create spatial index
+        if job_id:
+            job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+            if job:
+                job.current_stage = "indexing"
+                self.db.commit()
+
+        logger.info(f"Creating spatial index on {cache_table}")
         self.db.execute(text(f"CREATE INDEX {cache_table}_geom_idx ON {cache_table} USING GIST (geom)"))
 
         self.db.commit()
-        logger.info(f"Created table {cache_table} with {len(features)} features")
+        logger.info(f"Successfully stored {total_features:,} features in {cache_table}")
 
     def get_cached_geojson(self, dataset: Dataset) -> dict:
         """

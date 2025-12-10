@@ -3,13 +3,14 @@
 import logging
 import os
 import tempfile
+from datetime import datetime
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db
-from ..schemas import DownloadRequest, DownloadResponse, JobStatusResponse
+from ..schemas import DownloadRequest, DownloadResponse, JobStatusResponse, DownloadJobProgressResponse
 from spheraform_core.models import Dataset, DownloadJob, JobStatus, Geoserver, ProviderType, DownloadStrategy
 from spheraform_core.adapters import ArcGISAdapter
 
@@ -57,61 +58,141 @@ async def download_datasets(request: DownloadRequest, db: Session = Depends(get_
             status="ready",
         )
 
-    # Check if any datasets require async processing
+    # Always create a job for progress tracking
+    job = DownloadJob(
+        dataset_id=dataset.id,
+        status=JobStatus.PENDING,
+        strategy=dataset.download_strategy.value,
+        chunks_completed=0,
+        retry_count=0,
+        current_stage="pending",
+        features_downloaded=0,
+        features_stored=0,
+        params={
+            "dataset_ids": [str(d.id) for d in datasets],
+            "format": request.format,
+            "crs": request.crs,
+            "merge": request.merge,
+            "geometry": request.geometry,
+        },
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    logger.info(f"Created download job {job.id} for dataset {dataset.id}")
+
+    # Check if this requires async processing (background worker)
     needs_async = dataset.download_strategy in [DownloadStrategy.CHUNKED, DownloadStrategy.DISTRIBUTED]
 
     if needs_async:
-        # Create download job for background processing
-        job = DownloadJob(
-            dataset_id=dataset.id,
-            status=JobStatus.PENDING,
-            strategy=dataset.download_strategy.value,
-            chunks_completed=0,
-            retry_count=0,
-            params={
-                "dataset_ids": [str(d.id) for d in datasets],
-                "format": request.format,
-                "crs": request.crs,
-                "merge": request.merge,
-                "geometry": request.geometry,
-            },
-        )
-        db.add(job)
-        db.commit()
-        db.refresh(job)
-
-        logger.info(f"Created download job {job.id} for dataset {dataset.id}")
+        # Return job_id for worker to process
         return DownloadResponse(
             job_id=job.id,
             status="queued",
         )
 
-    # For small/medium datasets, download synchronously
+    # For small/medium datasets, download synchronously with progress tracking
     try:
         logger.info(f"Starting synchronous download for dataset {dataset.id}")
         download_service = DownloadService(db)
+
+        # Update job to running
+        job.status = JobStatus.RUNNING
+        job.started_at = datetime.utcnow()
+        job.current_stage = "downloading"
+        db.commit()
+
         result = await download_service.download_and_cache(
             dataset_id=dataset.id,
             geometry=request.geometry,
             format=request.format,
+            job_id=job.id,
         )
+
+        # Mark job as completed
+        job.status = JobStatus.COMPLETED
+        job.completed_at = datetime.utcnow()
+        job.current_stage = "complete"
+        job.output_path = f"/api/v1/download/{dataset.id}/file"
+        db.commit()
 
         logger.info(f"Download completed: {result}")
         return DownloadResponse(
+            job_id=job.id,
             download_url=f"/api/v1/download/{dataset.id}/file",
             status="completed",
         )
     except Exception as e:
         logger.exception(f"Error downloading dataset {dataset.id}: {e}")
+
+        # Mark job as failed
+        job.status = JobStatus.FAILED
+        job.completed_at = datetime.utcnow()
+        job.current_stage = "failed"
+        job.error = str(e)
+        db.commit()
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Download failed: {str(e)}",
         )
 
 
-@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
+@router.get("/datasets/{dataset_id}/latest", response_model=DownloadJobProgressResponse)
+async def get_latest_download_job(dataset_id: UUID, db: Session = Depends(get_db)):
+    """Get the most recent download job for a dataset (for resuming progress tracking)."""
+    job = (
+        db.query(DownloadJob)
+        .filter(DownloadJob.dataset_id == dataset_id)
+        .order_by(DownloadJob.created_at.desc())
+        .first()
+    )
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No download jobs found for dataset {dataset_id}",
+        )
+
+    # Calculate stage-based progress
+    progress = None
+    if job.current_stage == "downloading" and job.total_features:
+        progress = (job.features_downloaded / job.total_features) * 70  # 70% for download
+    elif job.current_stage == "storing" and job.total_features:
+        base = 70.0
+        store_progress = (job.features_stored / job.total_features) * 25  # 25% for storing
+        progress = base + store_progress
+    elif job.current_stage == "indexing":
+        progress = 95.0
+    elif job.status == JobStatus.COMPLETED:
+        progress = 100.0
+    elif job.total_chunks and job.total_chunks > 0:
+        # Fallback to chunk-based progress
+        progress = (job.chunks_completed / job.total_chunks) * 100
+
+    return DownloadJobProgressResponse(
+        id=job.id,
+        dataset_id=job.dataset_id,
+        status=job.status.value,
+        progress=progress,
+        current_stage=job.current_stage,
+        total_features=job.total_features,
+        features_downloaded=job.features_downloaded,
+        features_stored=job.features_stored,
+        chunks_completed=job.chunks_completed,
+        total_chunks=job.total_chunks,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+        output_path=job.output_path,
+    )
+
+
+@router.get("/jobs/{job_id}", response_model=DownloadJobProgressResponse)
 async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
-    """Get the status of a download job."""
+    """Get detailed status and progress of a download job."""
     job = db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
     if not job:
         raise HTTPException(
@@ -119,15 +200,86 @@ async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
             detail=f"Job {job_id} not found",
         )
 
-    # Calculate progress
+    # Calculate stage-based progress
     progress = None
-    if job.total_chunks:
+    if job.current_stage == "downloading" and job.total_features:
+        progress = (job.features_downloaded / job.total_features) * 70  # 70% for download
+    elif job.current_stage == "storing" and job.total_features:
+        base = 70.0
+        store_progress = (job.features_stored / job.total_features) * 25  # 25% for storing
+        progress = base + store_progress
+    elif job.current_stage == "indexing":
+        progress = 95.0
+    elif job.status == JobStatus.COMPLETED:
+        progress = 100.0
+    elif job.total_chunks and job.total_chunks > 0:
+        # Fallback to chunk-based progress
         progress = (job.chunks_completed / job.total_chunks) * 100
 
-    return JobStatusResponse(
+    return DownloadJobProgressResponse(
         id=job.id,
+        dataset_id=job.dataset_id,
         status=job.status.value,
         progress=progress,
+        current_stage=job.current_stage,
+        total_features=job.total_features,
+        features_downloaded=job.features_downloaded,
+        features_stored=job.features_stored,
+        chunks_completed=job.chunks_completed,
+        total_chunks=job.total_chunks,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+        output_path=job.output_path,
+    )
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=DownloadJobProgressResponse)
+async def cancel_download_job(job_id: UUID, db: Session = Depends(get_db)):
+    """Cancel a running or pending download job."""
+    job = db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job {job_id} not found",
+        )
+
+    # Only allow cancelling running or pending jobs
+    if job.status not in [JobStatus.RUNNING, JobStatus.PENDING]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel job with status {job.status.value}",
+        )
+
+    # Mark job as cancelled
+    job.status = JobStatus.CANCELLED
+    job.completed_at = datetime.utcnow()
+    job.current_stage = "cancelled"
+    db.commit()
+
+    logger.info(f"Download job {job_id} cancelled")
+
+    # Calculate progress for response
+    progress = None
+    if job.current_stage == "downloading" and job.total_features:
+        progress = (job.features_downloaded / job.total_features) * 70
+    elif job.current_stage == "storing" and job.total_features:
+        base = 70.0
+        store_progress = (job.features_stored / job.total_features) * 25
+        progress = base + store_progress
+
+    return DownloadJobProgressResponse(
+        id=job.id,
+        dataset_id=job.dataset_id,
+        status=job.status.value,
+        progress=progress,
+        current_stage=job.current_stage,
+        total_features=job.total_features,
+        features_downloaded=job.features_downloaded,
+        features_stored=job.features_stored,
+        chunks_completed=job.chunks_completed,
+        total_chunks=job.total_chunks,
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,

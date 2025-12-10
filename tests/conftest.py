@@ -15,7 +15,7 @@ admin.dialects.sqlite.after_create = lambda *args, **kwargs: None
 admin.dialects.sqlite.before_drop = lambda *args, **kwargs: None
 
 from spheraform_core.models.base import Base
-from spheraform_core.models import Geoserver, Dataset, DownloadJob, Theme
+from spheraform_core.models import Geoserver, Dataset, DownloadJob, CrawlJob, Theme
 from spheraform_api.main import app
 from spheraform_api.dependencies import get_db
 
