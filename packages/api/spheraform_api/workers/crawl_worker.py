@@ -140,6 +140,12 @@ class CrawlWorker:
 
                 # Second pass: discover datasets with progress updates
                 async for dataset_meta in adapter.discover_datasets():
+                    # Check if job was cancelled
+                    db.refresh(job)
+                    if job.status == JobStatus.CANCELLED:
+                        logger.info(f"Crawl job {job.id} was cancelled, stopping discovery")
+                        break
+
                     # Update progress periodically (every 10 datasets to reduce commits)
                     datasets_discovered = datasets_new + datasets_updated
 

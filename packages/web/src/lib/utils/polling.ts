@@ -48,7 +48,13 @@ export async function pollJobStatus<T>(
         // Continue polling
         setTimeout(poll, interval);
       } catch (error) {
-        reject(error);
+        // On 404 or network errors, consider the job unreachable and stop polling
+        // This handles cases where backend restarts or jobs are deleted
+        if (error instanceof Error && error.message.includes('404')) {
+          reject(new Error('Job not found - may have been cancelled or lost due to restart'));
+        } else {
+          reject(error);
+        }
       }
     };
 

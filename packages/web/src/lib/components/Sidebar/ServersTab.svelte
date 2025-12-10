@@ -168,10 +168,17 @@
 								if (srv?.expanded) {
 									refreshServerDatasets(serverId);
 								}
+							} else if (finalJob.status === 'failed') {
+								console.warn(`Crawl job ${job.id} failed:`, finalJob.error);
 							}
-						}).catch(() => {
-							// Ignore polling errors
+						}).catch((error) => {
+							// Reset UI state on polling errors (e.g., job not found after restart)
+							console.warn(`Polling failed for crawl job ${job.id}:`, error);
+							servers = servers.map(s =>
+								s.id === serverId ? { ...s, crawling: false, crawlJobId: undefined, crawlJobStatus: undefined } : s
+							);
 						}).finally(() => {
+							// Always clean up crawling state when done
 							servers = servers.map(s =>
 								s.id === serverId ? { ...s, crawling: false, crawlJobId: undefined } : s
 							);
@@ -272,6 +279,31 @@
 				s.id === serverId ? { ...s, crawling: false } : s
 			);
 			infoMessage = 'Error crawling server: ' + (e instanceof Error ? e.message : 'Unknown error');
+			showInfoModal = true;
+		}
+	}
+
+	async function cancelCrawl(serverId: string) {
+		const server = servers.find(s => s.id === serverId);
+		if (!server?.crawlJobId) return;
+
+		try {
+			// Cancel the job on backend
+			const res = await fetch(`/api/v1/servers/crawl/${server.crawlJobId}/cancel`, {
+				method: 'POST'
+			});
+
+			if (!res.ok) throw new Error('Failed to cancel crawl');
+
+			// Reset UI state immediately
+			servers = servers.map(s =>
+				s.id === serverId ? { ...s, crawling: false, crawlJobId: undefined, crawlJobStatus: null } : s
+			);
+
+			infoMessage = 'Crawl cancelled';
+			showInfoModal = true;
+		} catch (err) {
+			infoMessage = 'Error cancelling crawl: ' + (err instanceof Error ? err.message : String(err));
 			showInfoModal = true;
 		}
 	}
@@ -659,26 +691,31 @@
 							</button>
 						</div>
 						<div class="server-actions">
-							<button
-								class="icon-btn crawl-btn"
-								on:click|stopPropagation={() => crawlServer(server.id)}
-								disabled={server.crawling}
-								title={server.crawling ? '' : 'Crawl server for datasets'}>
-								{#if server.crawling}
-									<svg class="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
-										<path d="M12 2 A10 10 0 0 1 22 12" stroke-linecap="round"></path>
+							{#if server.crawling}
+								<button
+									class="icon-btn cancel-btn"
+									on:click|stopPropagation={() => cancelCrawl(server.id)}
+									title="Cancel crawl">
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<circle cx="12" cy="12" r="10"></circle>
+										<line x1="15" y1="9" x2="9" y2="15"></line>
+										<line x1="9" y1="9" x2="15" y2="15"></line>
 									</svg>
+								</button>
+								{#if server.crawlJobStatus}
+									<span class="progress-badge">{formatJobProgress(server.crawlJobStatus)}</span>
 								{:else}
+									<span class="progress-badge">Starting...</span>
+								{/if}
+							{:else}
+								<button
+									class="icon-btn crawl-btn"
+									on:click|stopPropagation={() => crawlServer(server.id)}
+									title="Crawl server for datasets">
 									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 										<polygon points="5 3 19 12 5 21 5 3"></polygon>
 									</svg>
-								{/if}
-							</button>
-							{#if server.crawling && server.crawlJobStatus}
-								<span class="progress-badge">{formatJobProgress(server.crawlJobStatus)}</span>
-							{:else if server.crawling}
-								<span class="progress-badge">Starting...</span>
+								</button>
 							{/if}
 							<button class="icon-btn edit-btn" on:click|stopPropagation={() => openEdit(server)} title="Edit">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -943,6 +980,16 @@
 	.delete-btn {
 		border-color: #fca5a5;
 		color: #dc2626;
+	}
+
+	.cancel-btn {
+		border-color: #fed7aa;
+		color: #ea580c;
+	}
+
+	.cancel-btn:hover:not(:disabled) {
+		background: #fff7ed;
+		border-color: #fb923c;
 	}
 
 	.delete-btn:hover {

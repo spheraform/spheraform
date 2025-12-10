@@ -235,6 +235,49 @@ async def get_crawl_status(job_id: UUID, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/crawl/{job_id}/cancel", response_model=CrawlJobResponse)
+async def cancel_crawl_job(job_id: UUID, db: Session = Depends(get_db)):
+    """Cancel a running or pending crawl job."""
+    job = db.query(CrawlJob).filter(CrawlJob.id == job_id).first()
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Crawl job {job_id} not found",
+        )
+
+    # Only allow cancelling running or pending jobs
+    if job.status not in [JobStatus.RUNNING, JobStatus.PENDING]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel job with status {job.status.value}",
+        )
+
+    # Mark job as cancelled
+    job.status = JobStatus.CANCELLED
+    job.completed_at = datetime.utcnow()
+    job.current_stage = "cancelled"
+    db.commit()
+
+    logger.info(f"Crawl job {job_id} cancelled")
+
+    return CrawlJobResponse(
+        id=job.id,
+        geoserver_id=job.geoserver_id,
+        status=job.status.value,
+        progress=None,
+        total_services=job.total_services,
+        services_processed=job.services_processed,
+        datasets_discovered=job.datasets_discovered,
+        datasets_new=job.datasets_new,
+        datasets_updated=job.datasets_updated,
+        current_stage=job.current_stage,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+    )
+
+
 @router.get("/{server_id}/health")
 async def check_health(server_id: UUID, db: Session = Depends(get_db)):
     """
