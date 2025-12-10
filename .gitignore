@@ -77,3 +77,7 @@ packages/web/.svelte-kit/
 packages/web/build/
 packages/web/.vite/
 packages/web/package-lock.json
+
+
+# Ignore DevSpace cache and log folder
+.devspace/
