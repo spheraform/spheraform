@@ -122,12 +122,43 @@
 	let detailModalTitle = '';
 	let detailModalRows: Array<{ label: string; value: string; link?: boolean }> = [];
 
-	onMount(async () => {
+	async function loadServers() {
 		try {
 			const response = await fetch('/api/v1/servers');
 			if (!response.ok) throw new Error('Failed to fetch servers');
 			const list = await response.json();
-			servers = list.map((s: any) => ({ ...s, expanded: false, loading: false, crawling: false }));
+
+			// Preserve existing UI state (expanded, loading, crawling) when reloading
+			const stateMap = new Map(servers.map(s => [s.id, {
+				expanded: s.expanded,
+				loading: s.loading,
+				crawling: s.crawling,
+				crawlJobId: s.crawlJobId,
+				crawlJobStatus: s.crawlJobStatus,
+				datasets: s.datasets
+			}]));
+
+			servers = list.map((s: any) => {
+				const existingState = stateMap.get(s.id);
+				return {
+					...s,
+					expanded: existingState?.expanded || false,
+					loading: existingState?.loading || false,
+					crawling: existingState?.crawling || false,
+					crawlJobId: existingState?.crawlJobId,
+					crawlJobStatus: existingState?.crawlJobStatus,
+					datasets: existingState?.datasets
+				};
+			});
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Unknown error';
+			throw e;
+		}
+	}
+
+	onMount(async () => {
+		try {
+			await loadServers();
 
 			// Resume any in-progress crawl jobs
 			await resumeCrawlJobs();
@@ -682,7 +713,7 @@
 					<div class="server-header">
 						<div class="server-info">
 							<h4>{server.name}</h4>
-							<button class="icon-btn server-info-btn" on:click|stopPropagation={() => showServerDetails(server)} title="View Details">
+							<button class="icon-btn server-info-btn tooltip-trigger" on:click|stopPropagation={() => showServerDetails(server)} data-tooltip="View Details">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<circle cx="12" cy="12" r="10"></circle>
 									<line x1="12" y1="16" x2="12" y2="12"></line>
@@ -693,37 +724,32 @@
 						<div class="server-actions">
 							{#if server.crawling}
 								<button
-									class="icon-btn cancel-btn"
+									class="icon-btn cancel-btn tooltip-trigger"
 									on:click|stopPropagation={() => cancelCrawl(server.id)}
-									title="Cancel crawl">
+									data-tooltip={server.crawlJobStatus ? formatJobProgress(server.crawlJobStatus) : 'Starting crawl...'}>
 									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 										<circle cx="12" cy="12" r="10"></circle>
 										<line x1="15" y1="9" x2="9" y2="15"></line>
 										<line x1="9" y1="9" x2="15" y2="15"></line>
 									</svg>
 								</button>
-								{#if server.crawlJobStatus}
-									<span class="progress-badge">{formatJobProgress(server.crawlJobStatus)}</span>
-								{:else}
-									<span class="progress-badge">Starting...</span>
-								{/if}
 							{:else}
 								<button
-									class="icon-btn crawl-btn"
+									class="icon-btn crawl-btn tooltip-trigger"
 									on:click|stopPropagation={() => crawlServer(server.id)}
-									title="Crawl server for datasets">
+									data-tooltip="Crawl server for datasets">
 									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 										<polygon points="5 3 19 12 5 21 5 3"></polygon>
 									</svg>
 								</button>
 							{/if}
-							<button class="icon-btn edit-btn" on:click|stopPropagation={() => openEdit(server)} title="Edit">
+							<button class="icon-btn edit-btn tooltip-trigger" on:click|stopPropagation={() => openEdit(server)} data-tooltip="Edit server">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
 									<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
 								</svg>
 							</button>
-							<button class="icon-btn delete-btn" on:click|stopPropagation={() => confirmDelete(server)} title="Delete">
+							<button class="icon-btn delete-btn tooltip-trigger" on:click|stopPropagation={() => confirmDelete(server)} data-tooltip="Delete server">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<polyline points="3 6 5 6 21 6"></polyline>
 									<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -767,7 +793,7 @@
 													</div>
 												</div>
 												<div class="dataset-actions">
-													<button class="icon-btn info-btn" on:click|stopPropagation={() => showDatasetDetails(dataset)} title="View Details">
+													<button class="icon-btn info-btn tooltip-trigger" on:click|stopPropagation={() => showDatasetDetails(dataset)} data-tooltip="View Details">
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 															<circle cx="12" cy="12" r="10"></circle>
 															<line x1="12" y1="16" x2="12" y2="12"></line>
@@ -775,11 +801,11 @@
 														</svg>
 													</button>
 													<button
-														class="icon-btn fetch-btn"
+														class="icon-btn fetch-btn tooltip-trigger"
 														class:loading={fetchingDatasets[dataset.id]}
 														on:click|stopPropagation={(e) => fetchDataset(dataset, e)}
 														disabled={fetchingDatasets[dataset.id]}
-														title={fetchingDatasets[dataset.id] ? "Fetching..." : "Fetch & Cache"}
+														data-tooltip={fetchingDatasets[dataset.id] ? "Fetching..." : "Fetch & Cache"}
 													>
 														{#if fetchingDatasets[dataset.id]}
 															<svg class="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -793,10 +819,10 @@
 														{/if}
 													</button>
 													<button
-														class="icon-btn map-btn"
+														class="icon-btn map-btn tooltip-trigger"
 														on:click|stopPropagation={(e) => showOnMap(dataset, e)}
 														disabled={!dataset.is_cached}
-														title={dataset.is_cached ? 'Show on Map' : 'Cache dataset first'}
+														data-tooltip={dataset.is_cached ? 'Show on Map' : 'Cache dataset first'}
 													>
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 															<path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"></path>
@@ -805,10 +831,10 @@
 														</svg>
 													</button>
 													<button
-														class="icon-btn download-btn"
+														class="icon-btn download-btn tooltip-trigger"
 														on:click|stopPropagation={(e) => downloadDatasetFile(dataset, e)}
 														disabled={!dataset.is_cached}
-														title={dataset.is_cached ? 'Download File' : 'Cache dataset first'}
+														data-tooltip={dataset.is_cached ? 'Download File' : 'Cache dataset first'}
 													>
 														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 															<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -1225,6 +1251,51 @@
 		border-color: rgba(0, 0, 0, 0.25);
 	}
 
+	/* Custom Tooltips */
+	.tooltip-trigger {
+		position: relative;
+	}
+
+	.tooltip-trigger::before {
+		content: attr(data-tooltip);
+		position: absolute;
+		bottom: calc(100% + 8px);
+		left: 50%;
+		transform: translateX(-50%);
+		padding: 8px 12px;
+		background: rgba(0, 0, 0, 0.9);
+		color: white;
+		font-size: 13px;
+		font-weight: 500;
+		line-height: 1.4;
+		border-radius: 6px;
+		white-space: nowrap;
+		pointer-events: none;
+		opacity: 0;
+		transition: opacity 0.2s ease-in-out;
+		z-index: 1000;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	}
+
+	.tooltip-trigger::after {
+		content: '';
+		position: absolute;
+		bottom: calc(100% + 2px);
+		left: 50%;
+		transform: translateX(-50%);
+		border: 6px solid transparent;
+		border-top-color: rgba(0, 0, 0, 0.9);
+		pointer-events: none;
+		opacity: 0;
+		transition: opacity 0.2s ease-in-out;
+		z-index: 1000;
+	}
+
+	.tooltip-trigger:hover::before,
+	.tooltip-trigger:hover::after {
+		opacity: 1;
+	}
+
 	/* Grid View */
 	.server-list.grid-view {
 		display: grid;
@@ -1248,21 +1319,6 @@
 		to {
 			transform: rotate(360deg);
 		}
-	}
-
-	/* Progress badge */
-	.progress-badge {
-		display: inline-block;
-		margin-left: 8px;
-		padding: 2px 8px;
-		font-size: 11px;
-		font-weight: 500;
-		background: rgba(59, 130, 246, 0.1);
-		color: #3b82f6;
-		border: 1px solid rgba(59, 130, 246, 0.2);
-		border-radius: 12px;
-		white-space: nowrap;
-		line-height: 1.4;
 	}
 
 	.fetch-btn.loading {
