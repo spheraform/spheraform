@@ -11,7 +11,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from spheraform_core.models import Dataset, Geoserver, DownloadStrategy, DownloadJob
+from spheraform_core.models import Dataset, Geoserver, DownloadStrategy, DownloadJob, JobStatus
 from spheraform_core.adapters import ArcGISAdapter
 
 logger = logging.getLogger("gunicorn.error")
@@ -194,6 +194,16 @@ class DownloadService:
         # Insert in batches for better progress feedback
         batch_size = 1000
         for i in range(0, total_features, batch_size):
+            # Check if job was cancelled
+            if job_id:
+                job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+                if job and job.status == JobStatus.CANCELLED:
+                    logger.info(f"Download job {job_id} was cancelled, stopping storage")
+                    # Clean up partial table
+                    self.db.execute(text(f"DROP TABLE IF EXISTS {cache_table}"))
+                    self.db.commit()
+                    return
+
             batch = features[i:i+batch_size]
 
             for feature in batch:
