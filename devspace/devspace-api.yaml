@@ -1,0 +1,59 @@
+version: v2beta1
+name: spheraform-api
+
+images:
+  api:
+    image: api
+    dockerfile: ../packages/api/Dockerfile
+
+deployments:
+  api:
+    helm:
+      chart:
+        name: component-chart
+        repo: https://charts.devspace.sh
+      values:
+        containers:
+          - name: spheraform-api
+            image: api
+            env:
+              - name: DATABASE_URL
+                value: postgresql+psycopg://spheraform:spheraform_dev@postgres:5432/spheraform
+              - name: REDIS_URL
+                value: redis://redis:6379/0
+              - name: S3_ENDPOINT
+                value: http://minio:9000
+              - name: S3_ACCESS_KEY
+                value: minioadmin
+              - name: S3_SECRET_KEY
+                value: minioadmin
+              - name: S3_BUCKET
+                value: spheraform
+              - name: PROXYSCRAPE_ENABLED
+                value: "false"
+        service:
+          ports:
+            - containerPort: 8000
+              port: 8000
+              protocol: TCP
+
+# This is a list of `dev` containers that are based on the containers created by your deployments
+dev:
+  api:
+    labelSelector:
+      app.kubernetes.io/component: api
+    # Sync files between the local filesystem and the development container
+    sync:
+      - path: ../packages/api:/app/api
+        uploadExcludeFile: .dockerignore
+      - path: ../packages/core:/app/core
+        uploadExcludeFile: .dockerignore
+    # Forward the following ports to be able access your application via localhost
+    ports:
+      - port: "8000"
+
+dependencies:
+  minio:
+    path: devspace-minio.yaml
+  postgres:
+    path: devspace-postgres.yaml

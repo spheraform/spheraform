@@ -1,0 +1,125 @@
+version: v2beta1
+name: spheraform
+
+# This is a list of `images` that DevSpace can build for this project
+# We recommend to skip image building during development (devspace dev) as much as possible
+images:
+  web:
+    image: web
+    dockerfile: packages/web/Dockerfile
+
+# This is a list of `deployments` that DevSpace can create for this project
+deployments:
+  martin:
+    # This deployment uses `helm` but you can also define `kubectl` deployments or kustomizations
+    helm:
+      chart:
+        name: component-chart
+        repo: https://charts.devspace.sh
+      # Under `values` we can define the values for this Helm chart used during `helm install/upgrade`
+      # You may also use `valuesFiles` to load values from files, e.g. valuesFiles: ["values.yaml"]
+      values:
+        containers:
+          - args:
+              - --webui
+              - enable-for-all
+              - --listen-addresses
+              - 0.0.0.0:3000
+              - --config
+              - /config/martin-config.yaml
+            env:
+              - name: DATABASE_URL
+                value: postgresql://spheraform:spheraform_dev@postgres:5432/spheraform
+            image: ghcr.io/maplibre/martin:latest
+            name: spheraform-martin
+            volumeMounts:
+              - containerPath: /config
+                volume:
+                  name: martin-config
+                  readOnly: false
+        service:
+          ports:
+            - containerPort: 3000
+              port: 3000
+              protocol: TCP
+        volumes:
+          - emptyDir: {}
+            name: martin-config
+  minio-setup:
+    # This deployment uses `helm` but you can also define `kubectl` deployments or kustomizations
+    helm:
+      chart:
+        name: component-chart
+        repo: https://charts.devspace.sh
+      # Under `values` we can define the values for this Helm chart used during `helm install/upgrade`
+      # You may also use `valuesFiles` to load values from files, e.g. valuesFiles: ["values.yaml"]
+      values:
+        containers:
+          - command:
+              - /bin/sh
+              - -c
+              - ' mc alias set myminio http://minio:9000 minioadmin minioadmin; mc mb myminio/spheraform --ignore-existing; mc anonymous set download myminio/spheraform; exit 0; '
+            image: minio/mc:latest
+            name: spheraform-minio-setup
+  web:
+    # This deployment uses `helm` but you can also define `kubectl` deployments or kustomizations
+    helm:
+      chart:
+        name: component-chart
+        repo: https://charts.devspace.sh
+      # Under `values` we can define the values for this Helm chart used during `helm install/upgrade`
+      # You may also use `valuesFiles` to load values from files, e.g. valuesFiles: ["values.yaml"]
+      values:
+        containers:
+          - env:
+              - name: API_URL
+                value: http://api:8000
+              - name: ORIGIN
+                value: http://localhost:5173
+            image: web
+            name: spheraform-web
+        restartPolicy: Always
+        service:
+          ports:
+            - containerPort: 3000
+              port: 5173
+              protocol: TCP
+
+# This is a list of `dev` containers that are based on the containers created by your deployments
+dev:
+  martin:
+    labelSelector:
+      app.kubernetes.io/component: martin
+    # Sync files between the local filesystem and the development container
+    sync:
+      - path: ./config:/config
+        startContainer: true
+    # Forward the following ports to be able access your application via localhost
+    ports:
+      - port: "3000"
+  web:
+    labelSelector:
+      app.kubernetes.io/component: web
+    # Sync files between the local filesystem and the development container
+    sync:
+      - path: ./packages/web:/app
+        uploadExcludeFile: .dockerignore
+    # Forward the following ports to be able access your application via localhost
+    ports:
+      - port: "5173:3000"
+
+dependencies:
+  api:
+    path: devspace/devspace-api.yaml
+  minio:
+    path: devspace/devspace-minio.yaml
+  postgres:
+    path: devspace/devspace-postgres.yaml
+
+# Define dependencies to other projects with a devspace.yaml
+# dependencies:
+#   api:
+#     git: https://...  # Git-based dependencies
+#     tag: v1.0.0
+#   ui:
+#     path: ./ui        # Path-based dependencies (for monorepos)
