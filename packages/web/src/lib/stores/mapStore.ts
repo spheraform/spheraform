@@ -29,7 +29,7 @@ function createMapStore() {
 	return {
 		subscribe,
 		setMap: (map: Map) => update(state => ({ ...state, map })),
-		addLayer: (datasetId: string, datasetName: string, cacheTable: string, geometryType?: string) => {
+		addLayer: (datasetId: string, datasetName: string, cacheTable: string, geometryType?: string, martinUrl = 'http://localhost:3000') => {
 			update(state => {
 				if (!state.map) return state;
 
@@ -54,7 +54,7 @@ function createMapStore() {
 				// Add vector tile source from Martin
 				map.addSource(sourceId, {
 					type: 'vector',
-					tiles: [`http://localhost:3000/${cacheTable}/{z}/{x}/{y}`],
+					tiles: [`${martinUrl}/${cacheTable}/{z}/{x}/{y}`],
 					minzoom: 0,
 					maxzoom: 14
 				});
