@@ -1,0 +1,50 @@
+{{- if .Values.api.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spheraform.fullname" . }}-api
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "spheraform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "spheraform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: api
+        image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+        imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: {{ include "spheraform.fullname" . }}-api-config
+        ports:
+        - containerPort: 8000
+          name: http
+        {{- if .Values.api.readinessProbe.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.api.readinessProbe.path }}
+            port: 8000
+          initialDelaySeconds: {{ .Values.api.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.api.readinessProbe.periodSeconds }}
+        {{- end }}
+        {{- if .Values.api.livenessProbe.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.api.livenessProbe.path }}
+            port: 8000
+          initialDelaySeconds: {{ .Values.api.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.api.livenessProbe.periodSeconds }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.api.resources | nindent 10 }}
+{{- end }}

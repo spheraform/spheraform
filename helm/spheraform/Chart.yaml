@@ -1,0 +1,14 @@
+apiVersion: v2
+name: spheraform
+description: A platform that aggregates geospatial datasets from multiple geoservers into one searchable catalogue
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - gis
+  - geospatial
+  - data-aggregation
+  - arcgis
+  - postgis
+maintainers:
+  - name: Spheraform Team

@@ -81,3 +81,14 @@ packages/web/package-lock.json
 
 # Ignore DevSpace cache and log folder
 .devspace/
+
+# Helm
+helm/spheraform/values-local.yaml
+helm/spheraform/charts/
+helm/spheraform/*.tgz
+
+# Skaffold
+.skaffold/
+
+# Tilt
+.tiltbuild/

@@ -1,0 +1,221 @@
+# skaffold.yaml - Helm-based deployment
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: spheraform
+
+build:
+  # Use local Docker for builds
+  local:
+    useDocker: true
+    concurrency: 2
+
+  artifacts:
+    # API Service
+    - image: spheraform-api
+      context: .
+      docker:
+        dockerfile: packages/api/Dockerfile
+        buildArgs:
+          ENV: production
+      sync:
+        manual:
+          - src: "packages/api/**/*.py"
+            dest: /app
+          - src: "packages/core/**/*.py"
+            dest: /app
+
+    # Web Service
+    - image: spheraform-web
+      context: .
+      docker:
+        dockerfile: packages/web/Dockerfile
+      sync:
+        manual:
+          - src: "packages/web/src/**/*.{js,ts,jsx,tsx,svelte,css,html}"
+            dest: /app/src
+
+# Deploy using Helm
+deploy:
+  helm:
+    releases:
+      - name: spheraform
+        chartPath: helm/spheraform
+        valuesFiles:
+          - helm/spheraform/values.yaml
+        createNamespace: true
+        upgradeOnChange: true
+        wait: true
+        recreatePods: false
+
+# Port forwarding for development
+portForward:
+  - resourceType: service
+    resourceName: spheraform-web
+    port: 5173
+    localPort: 5173
+  - resourceType: service
+    resourceName: spheraform-api
+    port: 8000
+    localPort: 8000
+  - resourceType: service
+    resourceName: spheraform-martin
+    port: 3000
+    localPort: 3000
+  - resourceType: service
+    resourceName: spheraform-minio
+    port: 9001
+    localPort: 9001
+
+# Profiles for different environments
+profiles:
+  # Local development (default)
+  - name: local
+    activation:
+      - command: dev
+      - env: PROFILE=local
+    build:
+      local:
+        push: false
+      artifacts:
+        - image: spheraform-api
+          docker:
+            dockerfile: packages/api/Dockerfile
+            target: ""  # Use default target
+        - image: spheraform-web
+          docker:
+            dockerfile: packages/web/Dockerfile
+            target: ""
+    deploy:
+      helm:
+        releases:
+          - name: spheraform
+            chartPath: helm/spheraform
+            valuesFiles:
+              - helm/spheraform/values.yaml
+              - helm/spheraform/values-local.yaml
+            setValues:
+              api.image.pullPolicy: Never
+              web.image.pullPolicy: Never
+              api.image.tag: latest
+              web.image.tag: latest
+            namespace: default
+
+  # Development with hot-reload
+  - name: dev
+    activation:
+      - command: dev
+    build:
+      local:
+        push: false
+    deploy:
+      helm:
+        releases:
+          - name: spheraform
+            chartPath: helm/spheraform
+            valuesFiles:
+              - helm/spheraform/values.yaml
+              - helm/spheraform/values-local.yaml
+            setValues:
+              api.image.pullPolicy: Never
+              web.image.pullPolicy: Never
+            namespace: default
+
+  # Staging environment
+  - name: staging
+    activation:
+      - env: PROFILE=staging
+    build:
+      artifacts:
+        - image: ghcr.io/yourusername/spheraform-api
+          context: .
+          docker:
+            dockerfile: packages/api/Dockerfile
+        - image: ghcr.io/yourusername/spheraform-web
+          context: .
+          docker:
+            dockerfile: packages/web/Dockerfile
+      local:
+        push: true
+      tagPolicy:
+        gitCommit:
+          variant: AbbrevCommitSha
+          prefix: "git-"
+    deploy:
+      helm:
+        releases:
+          - name: spheraform
+            chartPath: helm/spheraform
+            valuesFiles:
+              - helm/spheraform/values.yaml
+              - helm/spheraform/values-staging.yaml
+            setValueTemplates:
+              api.image.repository: ghcr.io/yourusername/spheraform-api
+              web.image.repository: ghcr.io/yourusername/spheraform-web
+              api.image.tag: "{{.IMAGE_TAG}}"
+              web.image.tag: "{{.IMAGE_TAG}}"
+            namespace: staging
+
+  # Production environment
+  - name: production
+    activation:
+      - env: PROFILE=production
+    build:
+      artifacts:
+        - image: ghcr.io/yourusername/spheraform-api
+          context: .
+          docker:
+            dockerfile: packages/api/Dockerfile
+        - image: ghcr.io/yourusername/spheraform-web
+          context: .
+          docker:
+            dockerfile: packages/web/Dockerfile
+      local:
+        push: true
+      tagPolicy:
+        gitCommit:
+          variant: CommitSha
+          prefix: "git-"
+    deploy:
+      helm:
+        releases:
+          - name: spheraform
+            chartPath: helm/spheraform
+            valuesFiles:
+              - helm/spheraform/values.yaml
+              - helm/spheraform/values-production.yaml
+            setValueTemplates:
+              api.image.repository: ghcr.io/yourusername/spheraform-api
+              web.image.repository: ghcr.io/yourusername/spheraform-web
+              api.image.tag: "{{.IMAGE_TAG}}"
+              web.image.tag: "{{.IMAGE_TAG}}"
+            namespace: production
+
+  # CI/CD profile (GitHub Actions, GitLab CI)
+  - name: ci
+    activation:
+      - env: CI=true
+    build:
+      artifacts:
+        - image: ghcr.io/yourusername/spheraform-api
+          context: .
+          docker:
+            dockerfile: packages/api/Dockerfile
+        - image: ghcr.io/yourusername/spheraform-web
+          context: .
+          docker:
+            dockerfile: packages/web/Dockerfile
+      local:
+        push: true
+      tagPolicy:
+        envTemplate:
+          template: "{{.IMAGE_TAG}}"
+
+# Test integration
+test:
+  - image: spheraform-api
+    structureTests:
+      - ./tests/structure/*.yaml
+  - image: spheraform-web
+    structureTests:
+      - ./tests/structure/*.yaml

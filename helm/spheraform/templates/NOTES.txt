@@ -1,0 +1,80 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║                 Spheraform has been successfully deployed!                ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Thank you for installing {{ .Chart.Name }} version {{ .Chart.Version }}.
+
+Your release is named: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🌐 Accessing Spheraform:
+
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  Web UI:  https://{{ .host }}
+  API:     https://{{ .host }}/api
+{{- end }}
+{{- else }}
+
+To access the services, use port-forwarding:
+
+  # Web UI (port 5173)
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "spheraform.fullname" . }}-web 5173:5173
+
+  # API (port 8000)
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "spheraform.fullname" . }}-api 8000:8000
+
+  # Martin tile server (port 3000)
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "spheraform.fullname" . }}-martin 3000:3000
+
+  # MinIO console (port 9001)
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "spheraform.fullname" . }}-minio 9001:9001
+
+Then access:
+  - Web UI:       http://localhost:5173
+  - API docs:     http://localhost:8000/docs
+  - Martin:       http://localhost:3000
+  - MinIO:        http://localhost:9001
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 Service Status:
+
+Check the status of all components:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+View logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=api --tail=50 -f
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=web --tail=50 -f
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔐 Default Credentials (CHANGE IN PRODUCTION!):
+
+{{- if not (eq .Values.global.environment "production") }}
+  PostgreSQL:
+    - Username: {{ .Values.postgres.username }}
+    - Password: {{ .Values.postgres.password }}
+
+  MinIO:
+    - Username: {{ .Values.minio.rootUser }}
+    - Password: {{ .Values.minio.rootPassword }}
+{{- else }}
+  Production environment detected. Ensure you have configured secure credentials!
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📚 Documentation:
+  Helm chart: helm show readme {{ .Chart.Name }}
+  Project:    https://github.com/yourusername/spheraform
+
+For support and issues, visit:
+  https://github.com/yourusername/spheraform/issues
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Happy mapping! 🗺️

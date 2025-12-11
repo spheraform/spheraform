@@ -1,0 +1,104 @@
+# Staging environment overrides
+# Use with: helm install spheraform . -f values-staging.yaml
+
+global:
+  environment: staging
+  storageClass: gp3  # AWS EBS - adjust for your cloud provider
+
+postgres:
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  persistence:
+    size: 10Gi
+    storageClass: gp3
+  # Use environment variables or secrets for production credentials
+  # password: ${POSTGRES_PASSWORD}
+
+redis:
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+  persistence:
+    size: 5Gi
+    storageClass: gp3
+
+minio:
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  persistence:
+    size: 20Gi
+    storageClass: gp3
+  # rootPassword: ${MINIO_PASSWORD}
+
+martin:
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+api:
+  image:
+    repository: ghcr.io/yourusername/spheraform-api
+    # tag: set via --set api.image.tag=git-abc123
+    pullPolicy: Always
+  replicas: 2
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+
+web:
+  image:
+    repository: ghcr.io/yourusername/spheraform-web
+    # tag: set via --set web.image.tag=git-abc123
+    pullPolicy: Always
+  replicas: 2
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+  env:
+    ORIGIN: "https://staging.spheraform.example.com"
+
+# Enable ingress for staging
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+  hosts:
+    - host: staging.spheraform.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          backend: api
+        - path: /
+          pathType: Prefix
+          backend: web
+  tls:
+    - secretName: spheraform-staging-tls
+      hosts:
+        - staging.spheraform.example.com
