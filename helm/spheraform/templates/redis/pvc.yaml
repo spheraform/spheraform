@@ -1,0 +1,18 @@
+{{- if and .Values.redis.enabled .Values.redis.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "spheraform.fullname" . }}-redis-data
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if or .Values.redis.persistence.storageClass .Values.global.storageClass }}
+  storageClassName: {{ .Values.redis.persistence.storageClass | default .Values.global.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.redis.persistence.size }}
+{{- end }}

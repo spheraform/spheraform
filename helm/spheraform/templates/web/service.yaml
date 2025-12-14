@@ -1,0 +1,19 @@
+{{- if .Values.web.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "spheraform.fullname" . }}-web
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "spheraform.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  ports:
+  - port: 5173
+    targetPort: 3000
+    protocol: TCP
+    name: http
+{{- end }}

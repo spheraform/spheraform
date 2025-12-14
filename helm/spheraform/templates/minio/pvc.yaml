@@ -1,0 +1,18 @@
+{{- if and .Values.minio.enabled .Values.minio.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "spheraform.fullname" . }}-minio-data
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if or .Values.minio.persistence.storageClass .Values.global.storageClass }}
+  storageClassName: {{ .Values.minio.persistence.storageClass | default .Values.global.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.minio.persistence.size }}
+{{- end }}

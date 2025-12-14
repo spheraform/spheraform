@@ -26,6 +26,7 @@
 	}
 
 	export let sidebarWidth: number = 400;
+	export let martinUrl: string;
 
 	let servers: Server[] = [];
 	let loading = true;
@@ -597,7 +598,7 @@
 				console.log(`Adding dataset ${dataset.id} to map...`);
 
 				// Add vector tiles to map
-				mapStore.addLayer(dataset.id, dataset.name, dataset.cache_table, dataset.geometry_type);
+				mapStore.addLayer(dataset.id, dataset.name, dataset.cache_table, dataset.geometry_type, martinUrl);
 
 				// Parse bbox WKT and zoom to extent
 				if (dataset.bbox && $mapStore.map) {

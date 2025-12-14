@@ -1,0 +1,15 @@
+{{- if .Values.web.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "spheraform.fullname" . }}-web-config
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+data:
+  API_URL: "http://{{ include "spheraform.fullname" . }}-api:8000"
+  MARTIN_URL: "http://{{ include "spheraform.fullname" . }}-martin:3000"
+  {{- range $key, $value := .Values.web.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}

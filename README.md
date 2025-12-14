@@ -24,9 +24,14 @@ spheraform/
 │   ├── cli/           # Command-line interface (Typer) [planned]
 │   ├── client/        # Python SDK [planned]
 │   └── pipelines/     # Dagster orchestration [planned]
+├── devspace/          # Kubernetes/DevSpace configurations
+├── config/            # Application configuration (Martin, etc.)
+├── scripts/           # Utility scripts for development
 ├── alembic/           # Database migrations
 ├── tests/             # Test suite
-└── docker-compose.yml # Full-stack deployment
+├── docs/              # Documentation
+├── docker-compose.yml # Docker Compose deployment
+└── devspace.yaml      # DevSpace/Kubernetes deployment
 ```
 
 ## Quick Start
@@ -77,6 +82,33 @@ npm run dev
 Visit:
 - **Web UI**: http://localhost:5173
 - **API Docs**: http://localhost:8000/docs
+
+### Kubernetes/Minikube Deployment
+
+For Kubernetes deployment using DevSpace (ideal for production-like local development):
+
+```bash
+# Start Minikube (if not already running)
+minikube start --cpus=4 --memory=8192
+
+# Deploy all services to Kubernetes
+devspace deploy
+
+# Or start development mode with hot-reload
+devspace dev
+
+# Clean up
+devspace purge
+```
+
+**See [docs/devspace.md](./docs/devspace.md) for detailed DevSpace configuration documentation.**
+
+This deployment provides:
+- Production-like Kubernetes environment locally
+- Hot-reload file sync in development mode
+- Automatic service discovery and networking
+- Persistent volumes for data storage (4Gi total)
+- All services automatically configured and connected
 
 ## Development
 

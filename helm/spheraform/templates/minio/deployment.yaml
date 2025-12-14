@@ -1,0 +1,64 @@
+{{- if .Values.minio.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spheraform.fullname" . }}-minio
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "spheraform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        {{- include "spheraform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      containers:
+      - name: minio
+        image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+        imagePullPolicy: {{ .Values.minio.image.pullPolicy }}
+        command: ["minio"]
+        args: ["server", "/data", "--console-address", ":9001"]
+        envFrom:
+        - configMapRef:
+            name: {{ include "spheraform.fullname" . }}-minio-config
+        ports:
+        - containerPort: 9000
+          name: api
+        - containerPort: 9001
+          name: console
+        {{- if .Values.minio.persistence.enabled }}
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        {{- end }}
+        {{- if .Values.minio.livenessProbe.enabled }}
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: {{ .Values.minio.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.minio.livenessProbe.periodSeconds }}
+        {{- end }}
+        {{- if .Values.minio.readinessProbe.enabled }}
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          initialDelaySeconds: {{ .Values.minio.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.minio.readinessProbe.periodSeconds }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.minio.resources | nindent 10 }}
+      {{- if .Values.minio.persistence.enabled }}
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ include "spheraform.fullname" . }}-minio-data
+      {{- end }}
+{{- end }}

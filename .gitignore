@@ -44,6 +44,8 @@ ENV/
 *.db
 *.sqlite
 *.sqlite3
+backup.sql
+*.sql.gz
 
 # Temporary files
 tmp/
@@ -77,3 +79,18 @@ packages/web/.svelte-kit/
 packages/web/build/
 packages/web/.vite/
 packages/web/package-lock.json
+
+
+# Ignore DevSpace cache and log folder
+.devspace/
+
+# Helm
+helm/spheraform/values-local.yaml
+helm/spheraform/charts/
+helm/spheraform/*.tgz
+
+# Skaffold
+.skaffold/
+
+# Tilt
+.tiltbuild/

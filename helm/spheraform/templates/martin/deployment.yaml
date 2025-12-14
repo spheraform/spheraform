@@ -1,0 +1,50 @@
+{{- if .Values.martin.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spheraform.fullname" . }}-martin
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: martin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "spheraform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: martin
+  template:
+    metadata:
+      labels:
+        {{- include "spheraform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: martin
+    spec:
+      containers:
+      - name: martin
+        image: "{{ .Values.martin.image.repository }}:{{ .Values.martin.image.tag }}"
+        imagePullPolicy: {{ .Values.martin.image.pullPolicy }}
+        args:
+        {{- if .Values.martin.webuiEnabled }}
+          - --webui
+          - enable-for-all
+        {{- end }}
+          - --listen-addresses
+          - 0.0.0.0:3000
+          - --config
+          - /config/martin-config.yaml
+        env:
+        - name: DATABASE_URL
+          value: {{ include "spheraform.postgres.connectionString" . | quote }}
+        ports:
+        - containerPort: 3000
+          name: http
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        resources:
+          {{- toYaml .Values.martin.resources | nindent 10 }}
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "spheraform.fullname" . }}-martin-config
+{{- end }}

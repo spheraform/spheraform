@@ -1,0 +1,112 @@
+# Production environment overrides
+# Use with: helm install spheraform . -f values-production.yaml
+
+global:
+  environment: production
+  storageClass: gp3  # AWS EBS - adjust for your cloud provider
+
+postgres:
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "8Gi"
+      cpu: "4000m"
+  persistence:
+    size: 100Gi
+    storageClass: gp3
+  # IMPORTANT: Override these with secure credentials from secrets
+  # password: ${POSTGRES_PASSWORD}
+
+redis:
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+  persistence:
+    size: 20Gi
+    storageClass: gp3
+
+minio:
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  persistence:
+    size: 100Gi
+    storageClass: gp3
+  # IMPORTANT: Override these with secure credentials from secrets
+  # rootPassword: ${MINIO_PASSWORD}
+
+martin:
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+
+api:
+  image:
+    repository: ghcr.io/yourusername/spheraform-api
+    # tag: set via --set api.image.tag=v0.1.0 or git-abc123
+    pullPolicy: Always
+  replicas: 3
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "8Gi"
+      cpu: "4000m"
+  env:
+    PROXYSCRAPE_ENABLED: "true"
+    DEFAULT_PROBE_FREQUENCY_HOURS: "6"
+    DEFAULT_DOWNLOAD_TIMEOUT: "600"
+    MAX_CONCURRENT_DOWNLOADS_PER_SERVER: "10"
+    MAX_CHUNK_PARALLEL: "20"
+
+web:
+  image:
+    repository: ghcr.io/yourusername/spheraform-web
+    # tag: set via --set web.image.tag=v0.1.0 or git-abc123
+    pullPolicy: Always
+  replicas: 3
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+  env:
+    ORIGIN: "https://spheraform.example.com"
+
+# Enable ingress with TLS for production
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: spheraform.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          backend: api
+        - path: /
+          pathType: Prefix
+          backend: web
+  tls:
+    - secretName: spheraform-prod-tls
+      hosts:
+        - spheraform.example.com

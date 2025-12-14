@@ -20,18 +20,22 @@ ENV C_INCLUDE_PATH=/usr/include/gdal
 RUN pip install GDAL==`gdal-config --version`
 
 # Copy and install core package first
-COPY packages/core /app/core
+COPY ./packages/core /app/core
 RUN pip install -e /app/core
 
 # Copy and install API package (includes dependencies from pyproject.toml)
-COPY packages/api /app/api
+COPY ./packages/api /app/api
 RUN pip install -e /app/api
 
-# Set working directory to API
-WORKDIR /app/api
+# Copy alembic migrations
+COPY ./alembic /app/alembic
+COPY ./alembic.ini /app/alembic.ini
+
+# Set working directory to app root (for alembic)
+WORKDIR /app
 
 # Expose port
 EXPOSE 8000
 
-# Run uvicorn
+# Run uvicorn (spheraform_api is installed as editable package)
 CMD ["uvicorn", "spheraform_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

@@ -1,0 +1,12 @@
+{{- if .Values.minio.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "spheraform.fullname" . }}-minio-config
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+data:
+  MINIO_ROOT_USER: {{ .Values.minio.rootUser | quote }}
+  MINIO_ROOT_PASSWORD: {{ .Values.minio.rootPassword | quote }}
+{{- end }}

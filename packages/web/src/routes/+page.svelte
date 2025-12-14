@@ -6,6 +6,8 @@
 	import TopRightBubbles from '$lib/components/Floating/TopRightBubbles.svelte';
 	import Sidebar from '$lib/components/Sidebar/Sidebar.svelte';
 
+	export let data;
+
 	let sidebarOpen = false;
 
 	onMount(() => {
@@ -36,7 +38,7 @@
 	<SearchBar />
 	<TopRightBubbles />
 
-	<Sidebar open={sidebarOpen} on:close={closeSidebar} />
+	<Sidebar open={sidebarOpen} martinUrl={data.config.martinUrl} on:close={closeSidebar} />
 </div>
 
 <style>
