@@ -38,6 +38,38 @@ postgres:
     enabled: true
     initialDelaySeconds: 5
     periodSeconds: 5
+  backup:
+    enabled: true
+    schedule: "0 * * * *"  # Every hour at minute 0
+    retention:
+      hourlyBackupHours: 72      # Keep hourly for 72 hours
+      dailyBackupDays: 30        # Keep daily for 30 days
+      dailyBackupHour: 0         # Hour to keep as daily backup (0-23)
+    storage:
+      local:
+        enabled: true
+        size: 10Gi
+        storageClass: ""  # Uses global.storageClass if empty
+      s3:
+        enabled: true
+        bucket: "spheraform"
+        prefix: "backups/postgres/"
+    image:
+      repository: kartoza/postgis
+      tag: "16-3.4"
+      pullPolicy: IfNotPresent
+    minioClient:
+      repository: minio/mc
+      tag: latest
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 3
 
 # Redis cache and queue
 redis:

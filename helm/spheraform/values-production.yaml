@@ -16,6 +16,12 @@ postgres:
   persistence:
     size: 100Gi
     storageClass: gp3
+  backup:
+    enabled: true
+    storage:
+      local:
+        size: 50Gi  # Larger for production
+        storageClass: gp3
   # IMPORTANT: Override these with secure credentials from secrets
   # password: ${POSTGRES_PASSWORD}
 

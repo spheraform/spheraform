@@ -1,0 +1,97 @@
+{{- if and .Values.postgres.enabled .Values.postgres.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "spheraform.fullname" . }}-postgres-backup
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres-backup
+spec:
+  schedule: {{ .Values.postgres.backup.schedule | quote }}
+  successfulJobsHistoryLimit: {{ .Values.postgres.backup.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.postgres.backup.failedJobsHistoryLimit }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "spheraform.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: postgres-backup
+        spec:
+          restartPolicy: OnFailure
+          initContainers:
+          - name: install-mc
+            image: "{{ .Values.postgres.backup.minioClient.repository }}:{{ .Values.postgres.backup.minioClient.tag }}"
+            imagePullPolicy: {{ .Values.postgres.backup.image.pullPolicy }}
+            command:
+            - /bin/sh
+            - -c
+            - |
+              cp /usr/bin/mc /shared/mc
+              chmod +x /shared/mc
+            volumeMounts:
+            - name: shared-bin
+              mountPath: /shared
+          containers:
+          - name: backup
+            image: "{{ .Values.postgres.backup.image.repository }}:{{ .Values.postgres.backup.image.tag }}"
+            imagePullPolicy: {{ .Values.postgres.backup.image.pullPolicy }}
+            command: ["/bin/bash", "/scripts/postgres_backup.sh"]
+            env:
+            - name: BACKUP_ENV
+              value: "kubernetes"
+            - name: PGHOST
+              value: {{ include "spheraform.fullname" . }}-postgres
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgres.username | quote }}
+            - name: PGPASSWORD
+              value: {{ .Values.postgres.password | quote }}
+            - name: MINIO_ENDPOINT
+              value: "http://{{ include "spheraform.fullname" . }}-minio:9000"
+            - name: MINIO_ACCESS_KEY
+              value: {{ .Values.minio.rootUser | quote }}
+            - name: MINIO_SECRET_KEY
+              value: {{ .Values.minio.rootPassword | quote }}
+            - name: MINIO_BUCKET
+              value: {{ .Values.postgres.backup.storage.s3.bucket | quote }}
+            - name: MINIO_PREFIX
+              value: {{ .Values.postgres.backup.storage.s3.prefix | quote }}
+            - name: RETENTION_HOURLY_HOURS
+              value: {{ .Values.postgres.backup.retention.hourlyBackupHours | quote }}
+            - name: RETENTION_DAILY_DAYS
+              value: {{ .Values.postgres.backup.retention.dailyBackupDays | quote }}
+            - name: RETENTION_DAILY_HOUR
+              value: {{ .Values.postgres.backup.retention.dailyBackupHour | quote }}
+            - name: PATH
+              value: "/shared:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backups
+            - name: backup-script
+              mountPath: /scripts
+              readOnly: true
+            - name: shared-bin
+              mountPath: /shared
+              readOnly: true
+            resources:
+              {{- toYaml .Values.postgres.backup.resources | nindent 14 }}
+          volumes:
+          - name: backup-storage
+            {{- if .Values.postgres.backup.storage.local.enabled }}
+            persistentVolumeClaim:
+              claimName: {{ include "spheraform.fullname" . }}-postgres-backup
+            {{- else }}
+            emptyDir: {}
+            {{- end }}
+          - name: backup-script
+            configMap:
+              name: {{ include "spheraform.fullname" . }}-postgres-backup-script
+              defaultMode: 0755
+          - name: shared-bin
+            emptyDir: {}
+{{- end }}
