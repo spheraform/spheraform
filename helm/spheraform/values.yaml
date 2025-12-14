@@ -12,7 +12,7 @@ global:
 postgres:
   enabled: true
   image:
-    repository: postgis/postgis
+    repository: kartoza/postgis
     tag: "16-3.4"
     pullPolicy: IfNotPresent
   resources:
