@@ -120,6 +120,43 @@ services:
       - "5173:3000"
     restart: unless-stopped
 
+  # PostgreSQL Backup Service
+  postgres-backup:
+    image: kartoza/postgis:16-3.4
+    container_name: spheraform-postgres-backup
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: spheraform
+      PGUSER: spheraform
+      PGPASSWORD: spheraform_dev
+      BACKUP_ENV: docker
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: spheraform
+      MINIO_PREFIX: backups/postgres/
+      RETENTION_HOURLY_HOURS: 72
+      RETENTION_DAILY_DAYS: 30
+      RETENTION_DAILY_HOUR: 0
+    volumes:
+      - postgres_backups:/backups
+      - ./scripts/backup:/scripts:ro
+    command: >
+      /bin/bash -c "
+      apk add --no-cache dcron curl &&
+      curl -o /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc &&
+      chmod +x /usr/local/bin/mc &&
+      echo '0 * * * * /scripts/postgres_backup.sh >> /var/log/backup.log 2>&1' | crontab - &&
+      crond -f -l 2
+      "
+    restart: unless-stopped
+
   # TiTiler - Commented out due to no ARM64 support
   # Uncomment if you're on x86_64 architecture
   # titiler:
@@ -140,3 +177,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  postgres_backups:

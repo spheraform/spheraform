@@ -134,6 +134,32 @@ local_resource(
     labels=['tools'],
 )
 
+# Backup management commands
+local_resource(
+    'backup-now',
+    cmd='kubectl create job --from=cronjob/spheraform-postgres-backup manual-backup-$(date +%s)',
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    resource_deps=['spheraform-postgres'],
+    labels=['tools'],
+)
+
+local_resource(
+    'backup-list',
+    cmd='kubectl exec deployment/spheraform-postgres-backup -- ls -lh /backups/postgres/',
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    labels=['tools'],
+)
+
+local_resource(
+    'backup-health',
+    cmd='kubectl exec deployment/spheraform-postgres-backup -- /scripts/backup_health_check.sh',
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    labels=['tools'],
+)
+
 # Watch for changes to Helm chart
 watch_file(HELM_CHART + '/values.yaml')
 watch_file(VALUES_FILE)
@@ -159,8 +185,11 @@ Services:
 Press 'space' to open Tilt UI
 
 Custom Commands:
-  • helm-lint  - Validate Helm chart
-  • db-shell   - Connect to PostgreSQL
-  • redis-cli  - Connect to Redis
-  • api-logs   - Stream API logs
+  • helm-lint     - Validate Helm chart
+  • db-shell      - Connect to PostgreSQL
+  • redis-cli     - Connect to Redis
+  • api-logs      - Stream API logs
+  • backup-now    - Run manual backup
+  • backup-list   - List available backups
+  • backup-health - Check backup health
 """)

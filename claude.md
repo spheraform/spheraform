@@ -13,6 +13,7 @@ The internet is filled with open GIS data, and there is a rich ecosystem of tool
 - S3
 - OpenDataHub
 - Many custom APIs
+- Non-geospatial formats that reference spatial coordiantes (PDFs, CSVs, HTML) when scraped
 
 However no tool exists for indexing all these sources, or viewing and accessing their contents from one place. Spheraform
 wishes to fill this gap and make open data accessible to everyone. ArcGIS Online and QGIS are not friendly interfaces and
