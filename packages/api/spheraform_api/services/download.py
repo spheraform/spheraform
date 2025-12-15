@@ -7,14 +7,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
+import os
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from spheraform_core.models import Dataset, Geoserver, DownloadStrategy, DownloadJob, JobStatus
 from spheraform_core.adapters import ArcGISAdapter
+from spheraform_core.storage.backend import PostGISStorageBackend, S3StorageBackend
 
 logger = logging.getLogger("gunicorn.error")
+
+# Environment variable to control storage backend
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "hybrid")  # Options: postgis, s3, hybrid
+USE_S3_FOR_LARGE_DATASETS = os.getenv("USE_S3_FOR_LARGE_DATASETS", "true").lower() == "true"
+MIN_FEATURES_FOR_S3 = int(os.getenv("MIN_FEATURES_FOR_S3", "10000"))
 
 
 class DownloadService:
@@ -22,6 +29,44 @@ class DownloadService:
 
     def __init__(self, db: Session):
         self.db = db
+
+    def _should_use_s3(self, dataset: Dataset, feature_count: Optional[int] = None) -> bool:
+        """
+        Determine if dataset should use S3 storage.
+
+        Args:
+            dataset: Dataset object
+            feature_count: Optional feature count (if known before download)
+
+        Returns:
+            True if should use S3, False for PostGIS
+        """
+        # Check global storage backend setting
+        if STORAGE_BACKEND == "s3":
+            return True
+        elif STORAGE_BACKEND == "postgis":
+            return False
+
+        # Hybrid mode - decide based on dataset characteristics
+        if not USE_S3_FOR_LARGE_DATASETS:
+            return False
+
+        # If dataset explicitly configured for S3
+        if dataset.use_s3_storage:
+            return True
+
+        # Check feature count threshold
+        count = feature_count or dataset.feature_count
+        if count and count >= MIN_FEATURES_FOR_S3:
+            logger.info(f"Dataset has {count:,} features (>= {MIN_FEATURES_FOR_S3:,}), using S3 storage")
+            return True
+
+        # Check download strategy - use S3 for chunked/distributed
+        if dataset.download_strategy in [DownloadStrategy.CHUNKED, DownloadStrategy.DISTRIBUTED]:
+            logger.info(f"Dataset uses {dataset.download_strategy.value} strategy, using S3 storage")
+            return True
+
+        return False
 
     async def download_and_cache(
         self,
@@ -115,32 +160,72 @@ class DownloadService:
                     if not features or len(features) == 0:
                         raise Exception(f"Download returned 0 features - dataset may be unavailable or query unsupported by server")
 
-                    # Store in PostGIS
-                    await self._store_in_postgis(
-                        cache_table=cache_table,
-                        geojson_data=geojson_data,
-                        job_id=job_id,
-                    )
+                    # Determine storage backend
+                    use_s3 = self._should_use_s3(dataset, feature_count=result.feature_count)
 
-                    # Update dataset metadata
-                    dataset.is_cached = True
-                    dataset.cached_at = datetime.utcnow()
-                    dataset.cache_table = cache_table
-                    dataset.cache_size_bytes = result.size_bytes
-                    if result.feature_count:
-                        dataset.feature_count = result.feature_count
+                    if use_s3:
+                        logger.info(f"Using S3 storage backend for {dataset.name}")
+                        backend = S3StorageBackend(self.db)
+                        storage_result = await backend.store_dataset(
+                            dataset_id=dataset_id,
+                            geojson_path=temp_path,
+                            job_id=job_id,
+                        )
+
+                        # Update dataset metadata for S3
+                        dataset.is_cached = True
+                        dataset.cached_at = datetime.utcnow()
+                        dataset.use_s3_storage = True
+                        dataset.storage_format = "geoparquet"
+                        dataset.s3_data_key = storage_result["s3_data_key"]
+                        dataset.s3_tiles_key = storage_result["s3_tiles_key"]
+                        dataset.cache_size_bytes = storage_result["size_bytes"]
+                        dataset.parquet_schema = storage_result.get("parquet_schema")
+                        if storage_result["feature_count"]:
+                            dataset.feature_count = storage_result["feature_count"]
+
+                        response = {
+                            "success": True,
+                            "dataset_id": str(dataset_id),
+                            "storage_backend": "s3",
+                            "s3_data_key": storage_result["s3_data_key"],
+                            "s3_tiles_key": storage_result["s3_tiles_key"],
+                            "feature_count": storage_result["feature_count"],
+                            "size_bytes": storage_result["size_bytes"],
+                        }
+                    else:
+                        logger.info(f"Using PostGIS storage backend for {dataset.name}")
+                        backend = PostGISStorageBackend(self.db)
+                        storage_result = await backend.store_dataset(
+                            dataset_id=dataset_id,
+                            geojson_path=temp_path,
+                            job_id=job_id,
+                        )
+
+                        # Update dataset metadata for PostGIS
+                        dataset.is_cached = True
+                        dataset.cached_at = datetime.utcnow()
+                        dataset.cache_table = storage_result["cache_table"]
+                        dataset.cache_size_bytes = storage_result["size_bytes"]
+                        dataset.storage_format = "postgis"
+                        dataset.use_s3_storage = False
+                        if storage_result["feature_count"]:
+                            dataset.feature_count = storage_result["feature_count"]
+
+                        response = {
+                            "success": True,
+                            "dataset_id": str(dataset_id),
+                            "storage_backend": "postgis",
+                            "cache_table": storage_result["cache_table"],
+                            "feature_count": storage_result["feature_count"],
+                            "size_bytes": storage_result["size_bytes"],
+                        }
 
                     self.db.commit()
 
-                    logger.info(f"Successfully cached {dataset.name} in table {cache_table}")
+                    logger.info(f"Successfully cached {dataset.name}")
 
-                    return {
-                        "success": True,
-                        "dataset_id": str(dataset_id),
-                        "cache_table": cache_table,
-                        "feature_count": result.feature_count,
-                        "size_bytes": result.size_bytes,
-                    }
+                    return response
 
                 finally:
                     # Clean up temp file
@@ -251,43 +336,38 @@ class DownloadService:
         self.db.commit()
         logger.info(f"Successfully stored {total_features:,} features in {cache_table}")
 
-    def get_cached_geojson(self, dataset: Dataset) -> dict:
+    async def get_cached_geojson(self, dataset: Dataset, bbox: Optional[tuple[float, float, float, float]] = None) -> dict:
         """
-        Retrieve cached GeoJSON from PostGIS.
+        Retrieve cached GeoJSON from storage backend (PostGIS or S3).
 
         Args:
-            dataset: Dataset object with cache_table set
+            dataset: Dataset object
+            bbox: Optional bounding box filter (minx, miny, maxx, maxy)
 
         Returns:
             GeoJSON FeatureCollection dict
         """
-        if not dataset.cache_table:
-            raise ValueError(f"Dataset {dataset.id} has no cache table")
+        if not dataset.is_cached:
+            raise ValueError(f"Dataset {dataset.id} is not cached")
 
-        logger.info(f"Retrieving cached data from {dataset.cache_table}")
+        # Determine storage backend and retrieve
+        if dataset.use_s3_storage and dataset.s3_data_key:
+            logger.info(f"Retrieving cached data from S3: {dataset.s3_data_key}")
+            backend = S3StorageBackend(self.db)
+        elif dataset.cache_table:
+            logger.info(f"Retrieving cached data from PostGIS: {dataset.cache_table}")
+            backend = PostGISStorageBackend(self.db)
+        else:
+            raise ValueError(f"Dataset {dataset.id} has no storage metadata")
 
-        # Query PostGIS table and export as GeoJSON (transform back to 4326)
-        query = text(f"""
-            SELECT jsonb_build_object(
-                'type', 'FeatureCollection',
-                'features', jsonb_agg(
-                    jsonb_build_object(
-                        'type', 'Feature',
-                        'geometry', ST_AsGeoJSON(ST_Transform(geom, 4326))::jsonb,
-                        'properties', properties
-                    )
-                )
-            )
-            FROM {dataset.cache_table}
-        """)
+        # Get GeoJSON file path from backend
+        geojson_path = await backend.retrieve_dataset(dataset.id, bbox=bbox)
 
-        result = self.db.execute(query).scalar()
-
-        if result is None:
-            # Empty table
-            return {
-                "type": "FeatureCollection",
-                "features": []
-            }
-
-        return result
+        # Load GeoJSON
+        try:
+            with open(geojson_path, 'r') as f:
+                geojson_data = json.load(f)
+            return geojson_data
+        finally:
+            # Clean up temporary file
+            Path(geojson_path).unlink(missing_ok=True)

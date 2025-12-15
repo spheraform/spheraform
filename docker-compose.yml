@@ -64,15 +64,23 @@ services:
       exit 0;
       "
 
-  # Martin tile server (connects to PostGIS)
+  # Martin tile server (serves tiles from PostGIS and PMTiles in S3)
   martin:
     image: ghcr.io/maplibre/martin:latest
     container_name: spheraform-martin
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://spheraform:spheraform_dev@postgres:5432/spheraform
+      # MinIO/S3 credentials for PMTiles access
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_REGION: us-east-1
+      AWS_ALLOW_HTTP: "true"
     ports:
       - "3000:3000"
     volumes:

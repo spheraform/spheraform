@@ -2,16 +2,26 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies including GDAL
+# Install system dependencies including GDAL and tippecanoe build deps
 RUN apt-get update -qq && apt-get install -y \
     gcc \
     g++ \
     make \
     cmake \
+    git \
+    zlib1g-dev \
+    libsqlite3-dev \
     gdal-bin \
     libgdal-dev \
     libproj-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Build and install tippecanoe from source
+RUN git clone https://github.com/felt/tippecanoe.git /tmp/tippecanoe && \
+    cd /tmp/tippecanoe && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/tippecanoe
 
 # Install GDAL Python bindings with correct version
 # Use environment variables instead of deprecated --global-option
