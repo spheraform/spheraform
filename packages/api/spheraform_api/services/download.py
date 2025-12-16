@@ -41,18 +41,21 @@ class DownloadService:
         Returns:
             True if should use object storage, False for PostGIS
         """
-        # Check global storage backend setting
+        # Check global storage backend setting (overrides everything)
         if STORAGE_BACKEND == "object_storage":
+            logger.info(f"STORAGE_BACKEND=object_storage, using object storage for {dataset.name}")
             return True
         elif STORAGE_BACKEND == "postgis":
+            logger.info(f"STORAGE_BACKEND=postgis, using PostGIS for {dataset.name}")
             return False
 
         # Hybrid mode - decide based on dataset characteristics
         if not USE_OBJECT_STORAGE_FOR_LARGE_DATASETS:
             return False
 
-        # If dataset explicitly configured for object storage
-        if dataset.use_s3_storage:  # Field name kept for backward compatibility
+        # If dataset explicitly configured for object storage (from previous downloads)
+        if dataset.use_s3_storage:
+            logger.info(f"Dataset {dataset.name} already configured for object storage")
             return True
 
         # Check feature count threshold
@@ -66,6 +69,7 @@ class DownloadService:
             logger.info(f"Dataset uses {dataset.download_strategy.value} strategy, using object storage")
             return True
 
+        logger.info(f"Using PostGIS for {dataset.name} (< {MIN_FEATURES_FOR_OBJECT_STORAGE} features)")
         return False
 
     async def download_and_cache(
@@ -167,65 +171,67 @@ class DownloadService:
                     if not features or len(features) == 0:
                         raise Exception(f"Download returned 0 features - dataset may be unavailable or query unsupported by server")
 
-                    # Determine storage backend
+                    # Determine storage backend - hybrid approach for large datasets
                     use_object_storage = self._should_use_object_storage(dataset, feature_count=result.feature_count)
 
+                    # ALWAYS store in PostGIS for tile serving (Martin compatibility)
+                    logger.info(f"Storing in PostGIS for tile serving: {dataset.name}")
+                    postgis_backend = PostGISStorageBackend(self.db)
+                    postgis_result = await postgis_backend.store_dataset(
+                        dataset_id=dataset_id,
+                        geojson_path=temp_path,
+                        job_id=job_id,
+                    )
+
+                    # Update dataset with PostGIS metadata
+                    dataset.is_cached = True
+                    dataset.cached_at = datetime.utcnow()
+                    dataset.cache_table = postgis_result["cache_table"]
+                    dataset.storage_format = "hybrid" if use_object_storage else "postgis"
+                    if postgis_result["feature_count"]:
+                        dataset.feature_count = postgis_result["feature_count"]
+
+                    # ALSO store in object storage for large datasets (data exports & future PMTiles)
                     if use_object_storage:
-                        logger.info(f"Using object storage backend for {dataset.name}")
-                        backend = S3StorageBackend(self.db)
-                        storage_result = await backend.store_dataset(
+                        logger.info(f"ALSO storing in object storage for data access: {dataset.name}")
+                        s3_backend = S3StorageBackend(self.db)
+                        s3_result = await s3_backend.store_dataset(
                             dataset_id=dataset_id,
                             geojson_path=temp_path,
                             job_id=job_id,
                         )
 
-                        # Update dataset metadata for object storage
-                        dataset.is_cached = True
-                        dataset.cached_at = datetime.utcnow()
-                        dataset.use_s3_storage = True  # Field name kept for backward compatibility
-                        dataset.storage_format = "geoparquet"
-                        dataset.s3_data_key = storage_result["s3_data_key"]
-                        dataset.s3_tiles_key = storage_result["s3_tiles_key"]
-                        dataset.cache_size_bytes = storage_result["size_bytes"]
-                        dataset.parquet_schema = storage_result.get("parquet_schema")
-                        if storage_result["feature_count"]:
-                            dataset.feature_count = storage_result["feature_count"]
+                        # Add object storage metadata
+                        dataset.use_s3_storage = True
+                        dataset.s3_data_key = s3_result["s3_data_key"]
+                        dataset.s3_tiles_key = s3_result["s3_tiles_key"]
+                        dataset.parquet_schema = s3_result.get("parquet_schema")
+
+                        # Total size is PostGIS + object storage
+                        dataset.cache_size_bytes = postgis_result["size_bytes"] + s3_result["size_bytes"]
 
                         response = {
                             "success": True,
                             "dataset_id": str(dataset_id),
-                            "storage_backend": "object_storage",
-                            "s3_data_key": storage_result["s3_data_key"],
-                            "s3_tiles_key": storage_result["s3_tiles_key"],
-                            "feature_count": storage_result["feature_count"],
-                            "size_bytes": storage_result["size_bytes"],
+                            "storage_backend": "hybrid",
+                            "cache_table": postgis_result["cache_table"],
+                            "s3_data_key": s3_result["s3_data_key"],
+                            "s3_tiles_key": s3_result["s3_tiles_key"],
+                            "feature_count": postgis_result["feature_count"],
+                            "size_bytes": dataset.cache_size_bytes,
                         }
                     else:
-                        logger.info(f"Using PostGIS storage backend for {dataset.name}")
-                        backend = PostGISStorageBackend(self.db)
-                        storage_result = await backend.store_dataset(
-                            dataset_id=dataset_id,
-                            geojson_path=temp_path,
-                            job_id=job_id,
-                        )
-
-                        # Update dataset metadata for PostGIS
-                        dataset.is_cached = True
-                        dataset.cached_at = datetime.utcnow()
-                        dataset.cache_table = storage_result["cache_table"]
-                        dataset.cache_size_bytes = storage_result["size_bytes"]
-                        dataset.storage_format = "postgis"
+                        # Small dataset - PostGIS only
                         dataset.use_s3_storage = False
-                        if storage_result["feature_count"]:
-                            dataset.feature_count = storage_result["feature_count"]
+                        dataset.cache_size_bytes = postgis_result["size_bytes"]
 
                         response = {
                             "success": True,
                             "dataset_id": str(dataset_id),
                             "storage_backend": "postgis",
-                            "cache_table": storage_result["cache_table"],
-                            "feature_count": storage_result["feature_count"],
-                            "size_bytes": storage_result["size_bytes"],
+                            "cache_table": postgis_result["cache_table"],
+                            "feature_count": postgis_result["feature_count"],
+                            "size_bytes": postgis_result["size_bytes"],
                         }
 
                     self.db.commit()
