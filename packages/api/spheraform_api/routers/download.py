@@ -358,11 +358,11 @@ async def download_dataset_file(
                 detail=f"Failed to refresh dataset: {str(e)}",
             )
 
-    # Dataset is cached - retrieve from PostGIS
-    if not dataset.cache_table:
+    # Dataset is cached - retrieve from storage backend (PostGIS or object storage)
+    if not dataset.cache_table and not (dataset.use_s3_storage and dataset.s3_data_key):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Dataset marked as cached but no cache_table found",
+            detail="Dataset marked as cached but no storage metadata found",
         )
 
     try:
@@ -372,9 +372,9 @@ async def download_dataset_file(
         temp_fd, temp_path = tempfile.mkstemp(suffix=".geojson", prefix=f"dataset_{dataset_id}_")
         os.close(temp_fd)
 
-        # Get GeoJSON from service
+        # Get GeoJSON from service (handles both PostGIS and object storage)
         download_service = DownloadService(db)
-        geojson_data = download_service.get_cached_geojson(dataset)
+        geojson_data = await download_service.get_cached_geojson(dataset)
 
         # Write to file
         with open(temp_path, 'w') as f:

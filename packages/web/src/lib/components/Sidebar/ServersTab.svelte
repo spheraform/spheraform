@@ -588,7 +588,7 @@
 		async function showOnMap(dataset: any, e?: Event) {
 			e && e.stopPropagation();
 			try {
-				// Only work with cached datasets
+				// Only work with cached datasets (must have PostGIS cache_table for tiles)
 				if (!dataset.is_cached || !dataset.cache_table) {
 					infoMessage = 'Please fetch and cache the dataset first using the refresh button.';
 					showInfoModal = true;
@@ -597,7 +597,7 @@
 
 				console.log(`Adding dataset ${dataset.id} to map...`);
 
-				// Add vector tiles to map
+				// Add vector tiles to map from PostGIS cache
 				mapStore.addLayer(dataset.id, dataset.name, dataset.cache_table, dataset.geometry_type, martinUrl);
 
 				// Parse bbox WKT and zoom to extent

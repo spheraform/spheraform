@@ -84,6 +84,9 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
     source_srid: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True
     )  # Source coordinate system (EPSG/WKID)
+    max_record_count: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # Maximum records per request (pagination limit)
     last_edit_date: Mapped[Optional[datetime]] = mapped_column(
         nullable=True
     )  # Last edit date from source
@@ -103,8 +106,31 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
     cached_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     cache_table: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True
-    )  # PostGIS table name if cached
+    )  # PostGIS table name if cached (DEPRECATED - for backward compatibility)
     cache_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # S3 Storage (GeoParquet + PMTiles)
+    storage_format: Mapped[str] = mapped_column(
+        SQLEnum("postgis", "geoparquet", "hybrid", name="storage_format"),
+        default="postgis",
+        nullable=False,
+        index=True,
+    )
+    use_s3_storage: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, index=True
+    )
+    s3_data_key: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Path to GeoParquet file in S3
+    s3_tiles_key: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Path to PMTiles file in S3
+    parquet_schema: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # JSON schema of GeoParquet
+    parquet_row_groups: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # Number of row groups in Parquet file
 
     # Download Strategy
     download_strategy: Mapped[DownloadStrategy] = mapped_column(

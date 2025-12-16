@@ -181,11 +181,22 @@ class CrawlWorker:
                         existing.service_item_id = dataset_meta.service_item_id
                         existing.geometry_type = dataset_meta.geometry_type
                         existing.source_srid = dataset_meta.source_srid
+                        existing.max_record_count = dataset_meta.max_record_count
                         existing.last_edit_date = dataset_meta.last_edit_date
                         existing.themes = dataset_meta.themes
+                        # Store raw metadata (includes maxRecordCount, etc)
+                        if dataset_meta.source_metadata:
+                            import json
+                            existing.source_metadata = json.dumps(dataset_meta.source_metadata) if isinstance(dataset_meta.source_metadata, dict) else dataset_meta.source_metadata
                         datasets_updated += 1
                     else:
                         # Create new dataset
+                        # Store raw metadata (includes maxRecordCount, etc)
+                        source_metadata_str = None
+                        if dataset_meta.source_metadata:
+                            import json
+                            source_metadata_str = json.dumps(dataset_meta.source_metadata) if isinstance(dataset_meta.source_metadata, dict) else dataset_meta.source_metadata
+
                         new_dataset = Dataset(
                             geoserver_id=server.id,
                             external_id=dataset_meta.external_id,
@@ -199,8 +210,10 @@ class CrawlWorker:
                             service_item_id=dataset_meta.service_item_id,
                             geometry_type=dataset_meta.geometry_type,
                             source_srid=dataset_meta.source_srid,
+                            max_record_count=dataset_meta.max_record_count,
                             last_edit_date=dataset_meta.last_edit_date,
                             themes=dataset_meta.themes,
+                            source_metadata=source_metadata_str,
                         )
                         db.add(new_dataset)
                         datasets_new += 1

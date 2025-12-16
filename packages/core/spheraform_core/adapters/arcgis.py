@@ -335,6 +335,9 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             layer_info.get("description")
         )
 
+        # Extract maxRecordCount for pagination
+        max_record_count = layer_info.get("maxRecordCount")
+
         return DatasetMetadata(
             external_id=str(layer_info.get("id")),
             name=dataset_name,
@@ -354,6 +357,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             source_srid=source_srid,
             last_edit_date=self._parse_edit_date(layer_info),
             themes=themes,
+            max_record_count=max_record_count,
         )
 
     def _parse_edit_date(self, layer_info: dict) -> Optional[datetime]:
@@ -488,7 +492,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         self,
         layer_url: str,
         output_path: str,
-        max_records: int = 1000,
+        max_records: Optional[int] = None,
         geometry: Optional[dict] = None,
         format: str = "geojson",
     ) -> DownloadResult:
@@ -500,12 +504,16 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         Args:
             layer_url: Full URL to the layer
             output_path: Path to save the GeoJSON file
-            max_records: Maximum records per request
+            max_records: Maximum records per request (from dataset metadata, or will query if not provided)
             geometry: Optional spatial filter
             format: Output format (geojson)
         """
         try:
             query_url = f"{layer_url}/query"
+
+            # Use provided max_records, or default to 1000
+            page_size = max_records if max_records else 1000
+            logger.info(f"Using page size {page_size} for download")
 
             # Get total count first
             count_params = {
@@ -534,7 +542,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                     "returnGeometry": "true",
                     "outSR": "4326",
                     "resultOffset": str(offset),
-                    "resultRecordCount": str(max_records),
+                    "resultRecordCount": str(page_size),
                     "f": "geojson",
                 }
 

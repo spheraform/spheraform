@@ -166,6 +166,12 @@ martin:
         clipGeom: true
         geometryColumn: geom
         srid: 3857
+  pmtiles:
+    # Storage backend for PMTiles
+    # Supported protocols: s3://, gs://, az://, file://, https://
+    storageProtocol: "s3://"  # Override with PMTILES_STORAGE_PROTOCOL env var
+    storagePath: "spheraform/datasets/"  # Override with PMTILES_STORAGE_PATH env var
+    cacheSizeMb: 128
 
 # Spheraform API
 api:
@@ -188,6 +194,12 @@ api:
     DEFAULT_DOWNLOAD_TIMEOUT: "300"
     MAX_CONCURRENT_DOWNLOADS_PER_SERVER: "5"
     MAX_CHUNK_PARALLEL: "10"
+    # Storage backend configuration
+    STORAGE_BACKEND: "object_storage"  # Options: postgis, object_storage, hybrid
+    USE_OBJECT_STORAGE_FOR_LARGE_DATASETS: "true"
+    MIN_FEATURES_FOR_OBJECT_STORAGE: "10000"
+    PMTILES_MAX_ZOOM: "14"
+    POSTGIS_CACHE_RETENTION_DAYS: "30"
   livenessProbe:
     enabled: true
     path: /health
