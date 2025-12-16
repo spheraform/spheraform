@@ -19,9 +19,9 @@ from spheraform_core.storage.backend import PostGISStorageBackend, S3StorageBack
 logger = logging.getLogger("gunicorn.error")
 
 # Environment variable to control storage backend
-STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "hybrid")  # Options: postgis, s3, hybrid
-USE_S3_FOR_LARGE_DATASETS = os.getenv("USE_S3_FOR_LARGE_DATASETS", "true").lower() == "true"
-MIN_FEATURES_FOR_S3 = int(os.getenv("MIN_FEATURES_FOR_S3", "10000"))
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "hybrid")  # Options: postgis, object_storage, hybrid
+USE_OBJECT_STORAGE_FOR_LARGE_DATASETS = os.getenv("USE_OBJECT_STORAGE_FOR_LARGE_DATASETS", "true").lower() == "true"
+MIN_FEATURES_FOR_OBJECT_STORAGE = int(os.getenv("MIN_FEATURES_FOR_OBJECT_STORAGE", "10000"))
 
 
 class DownloadService:
@@ -30,40 +30,40 @@ class DownloadService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _should_use_s3(self, dataset: Dataset, feature_count: Optional[int] = None) -> bool:
+    def _should_use_object_storage(self, dataset: Dataset, feature_count: Optional[int] = None) -> bool:
         """
-        Determine if dataset should use S3 storage.
+        Determine if dataset should use object storage (S3/MinIO/GCS/Azure).
 
         Args:
             dataset: Dataset object
             feature_count: Optional feature count (if known before download)
 
         Returns:
-            True if should use S3, False for PostGIS
+            True if should use object storage, False for PostGIS
         """
         # Check global storage backend setting
-        if STORAGE_BACKEND == "s3":
+        if STORAGE_BACKEND == "object_storage":
             return True
         elif STORAGE_BACKEND == "postgis":
             return False
 
         # Hybrid mode - decide based on dataset characteristics
-        if not USE_S3_FOR_LARGE_DATASETS:
+        if not USE_OBJECT_STORAGE_FOR_LARGE_DATASETS:
             return False
 
-        # If dataset explicitly configured for S3
-        if dataset.use_s3_storage:
+        # If dataset explicitly configured for object storage
+        if dataset.use_s3_storage:  # Field name kept for backward compatibility
             return True
 
         # Check feature count threshold
         count = feature_count or dataset.feature_count
-        if count and count >= MIN_FEATURES_FOR_S3:
-            logger.info(f"Dataset has {count:,} features (>= {MIN_FEATURES_FOR_S3:,}), using S3 storage")
+        if count and count >= MIN_FEATURES_FOR_OBJECT_STORAGE:
+            logger.info(f"Dataset has {count:,} features (>= {MIN_FEATURES_FOR_OBJECT_STORAGE:,}), using object storage")
             return True
 
-        # Check download strategy - use S3 for chunked/distributed
+        # Check download strategy - use object storage for chunked/distributed
         if dataset.download_strategy in [DownloadStrategy.CHUNKED, DownloadStrategy.DISTRIBUTED]:
-            logger.info(f"Dataset uses {dataset.download_strategy.value} strategy, using S3 storage")
+            logger.info(f"Dataset uses {dataset.download_strategy.value} strategy, using object storage")
             return True
 
         return False
@@ -116,6 +116,11 @@ class DownloadService:
                     temp_path = temp_file.name
 
                 try:
+                    # Use maxRecordCount from dataset metadata (extracted during discovery)
+                    max_records = dataset.max_record_count
+                    if max_records:
+                        logger.info(f"Using maxRecordCount {max_records} from dataset metadata")
+
                     # Download based on strategy
                     # Note: Using download_paged for all strategies since it accepts full layer_url
                     # download_simple assumes base_url + "/FeatureServer/{external_id}" which may not match all servers
@@ -124,7 +129,7 @@ class DownloadService:
                         result = await adapter.download_paged(
                             layer_url=dataset.access_url,
                             output_path=temp_path,
-                            max_records=50,  # Very small pages to handle complex geometries
+                            max_records=max_records,
                             geometry=geometry,
                             format=format,
                         )
@@ -133,6 +138,7 @@ class DownloadService:
                         result = await adapter.download_paged(
                             layer_url=dataset.access_url,
                             output_path=temp_path,
+                            max_records=max_records,
                             geometry=geometry,
                             format=format,
                         )
@@ -142,6 +148,7 @@ class DownloadService:
                         result = await adapter.download_paged(
                             layer_url=dataset.access_url,
                             output_path=temp_path,
+                            max_records=max_records,
                             geometry=geometry,
                             format=format,
                         )
@@ -161,10 +168,10 @@ class DownloadService:
                         raise Exception(f"Download returned 0 features - dataset may be unavailable or query unsupported by server")
 
                     # Determine storage backend
-                    use_s3 = self._should_use_s3(dataset, feature_count=result.feature_count)
+                    use_object_storage = self._should_use_object_storage(dataset, feature_count=result.feature_count)
 
-                    if use_s3:
-                        logger.info(f"Using S3 storage backend for {dataset.name}")
+                    if use_object_storage:
+                        logger.info(f"Using object storage backend for {dataset.name}")
                         backend = S3StorageBackend(self.db)
                         storage_result = await backend.store_dataset(
                             dataset_id=dataset_id,
@@ -172,10 +179,10 @@ class DownloadService:
                             job_id=job_id,
                         )
 
-                        # Update dataset metadata for S3
+                        # Update dataset metadata for object storage
                         dataset.is_cached = True
                         dataset.cached_at = datetime.utcnow()
-                        dataset.use_s3_storage = True
+                        dataset.use_s3_storage = True  # Field name kept for backward compatibility
                         dataset.storage_format = "geoparquet"
                         dataset.s3_data_key = storage_result["s3_data_key"]
                         dataset.s3_tiles_key = storage_result["s3_tiles_key"]
@@ -187,7 +194,7 @@ class DownloadService:
                         response = {
                             "success": True,
                             "dataset_id": str(dataset_id),
-                            "storage_backend": "s3",
+                            "storage_backend": "object_storage",
                             "s3_data_key": storage_result["s3_data_key"],
                             "s3_tiles_key": storage_result["s3_tiles_key"],
                             "feature_count": storage_result["feature_count"],

@@ -84,6 +84,9 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
     source_srid: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True
     )  # Source coordinate system (EPSG/WKID)
+    max_record_count: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # Maximum records per request (pagination limit)
     last_edit_date: Mapped[Optional[datetime]] = mapped_column(
         nullable=True
     )  # Last edit date from source

@@ -32,4 +32,23 @@ data:
 
     # Default tile generation settings
     default_srid: {{ .Values.martin.config.defaultSrid }}
+
+    {{- if .Values.martin.pmtiles }}
+    # PMTiles sources from object storage
+    # Supports: s3://, gs://, az://, file://, https://
+    # NOTE: Martin does not support glob patterns for S3.
+    # PMTiles sources must be registered individually via API or by listing explicit paths.
+    # For dynamic discovery, sources will be added programmatically when datasets are cached.
+    pmtiles:
+      paths: []  # Empty - sources will be added dynamically or via API
+      {{- if and .Values.minio.enabled (eq .Values.martin.pmtiles.storageProtocol "s3://") }}
+      # MinIO/S3 credentials (required for Martin v1.0+)
+      access_key_id: {{ .Values.minio.rootUser | quote }}
+      secret_access_key: {{ .Values.minio.rootPassword | quote }}
+      endpoint_url: "http://{{ include "spheraform.fullname" . }}-minio:9000"
+      region: "us-east-1"
+      allow_http: true
+      virtual_hosted_style_request: false  # Path-style for MinIO
+      {{- end }}
+    {{- end }}
 {{- end }}

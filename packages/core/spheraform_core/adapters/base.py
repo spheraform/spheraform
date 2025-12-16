@@ -65,6 +65,7 @@ class DatasetMetadata:
     source_srid: Optional[int] = None  # Source coordinate system (EPSG/WKID)
     last_edit_date: Optional[datetime] = None  # Last edit date from source
     themes: Optional[list[str]] = None  # Classified themes
+    max_record_count: Optional[int] = None  # Maximum records per request (pagination limit)
 
 
 @dataclass

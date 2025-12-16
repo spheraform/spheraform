@@ -34,6 +34,36 @@ spec:
         env:
         - name: DATABASE_URL
           value: {{ include "spheraform.postgres.connectionString" . | quote }}
+        {{- if .Values.martin.pmtiles }}
+        # PMTiles storage backend environment variables
+        - name: PMTILES_STORAGE_PROTOCOL
+          value: {{ .Values.martin.pmtiles.storageProtocol | quote }}
+        - name: PMTILES_STORAGE_PATH
+          value: {{ .Values.martin.pmtiles.storagePath | quote }}
+        {{- end }}
+        {{- if and .Values.minio.enabled (eq .Values.martin.pmtiles.storageProtocol "s3://") }}
+        # MinIO/S3 credentials for PMTiles access
+        - name: AWS_ACCESS_KEY_ID
+          value: {{ .Values.minio.rootUser | quote }}
+        - name: AWS_SECRET_ACCESS_KEY
+          value: {{ .Values.minio.rootPassword | quote }}
+        - name: AWS_ENDPOINT_URL
+          value: "http://{{ include "spheraform.fullname" . }}-minio:9000"
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: AWS_ALLOW_HTTP
+          value: "true"
+        # Force path-style S3 addressing for MinIO
+        - name: AWS_S3_FORCE_PATH_STYLE
+          value: "true"
+        {{- end }}
+        {{- if .Values.martin.env }}
+        # Additional environment variables from values
+        {{- range $key, $value := .Values.martin.env }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        {{- end }}
         ports:
         - containerPort: 3000
           name: http

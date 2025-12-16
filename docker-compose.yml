@@ -81,6 +81,11 @@ services:
       AWS_ENDPOINT_URL: http://minio:9000
       AWS_REGION: us-east-1
       AWS_ALLOW_HTTP: "true"
+      # Force path-style S3 addressing for MinIO (required for non-AWS S3-compatible storage)
+      AWS_S3_FORCE_PATH_STYLE: "true"
+      # PMTiles storage backend configuration
+      PMTILES_STORAGE_PROTOCOL: ${PMTILES_STORAGE_PROTOCOL:-s3://}
+      PMTILES_STORAGE_PATH: ${PMTILES_STORAGE_PATH:-spheraform/datasets/}
     ports:
       - "3000:3000"
     volumes:
