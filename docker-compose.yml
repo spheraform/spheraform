@@ -118,6 +118,81 @@ services:
       - ./packages/core:/app/core
     restart: unless-stopped
 
+  # Celery Download Workers
+  celery-download-worker:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://spheraform:spheraform_dev@postgres:5432/spheraform
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: spheraform
+      USE_CELERY: "true"
+    command: celery -A spheraform_api.celery_app worker -Q downloads -c 4 -n download@%h
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  # Celery Crawl Workers
+  celery-crawl-worker:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://spheraform:spheraform_dev@postgres:5432/spheraform
+      REDIS_URL: redis://redis:6379/0
+      USE_CELERY: "true"
+    command: celery -A spheraform_api.celery_app worker -Q crawls -c 2 -n crawl@%h
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+
+  # Celery Beat (periodic tasks scheduler)
+  celery-beat:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://spheraform:spheraform_dev@postgres:5432/spheraform
+      REDIS_URL: redis://redis:6379/0
+    command: celery -A spheraform_api.celery_app beat -l info
+    restart: unless-stopped
+
+  # Flower (Celery monitoring dashboard)
+  flower:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    depends_on:
+      - redis
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    command: celery -A spheraform_api.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    restart: unless-stopped
+
   # Spheraform Web Interface
   web:
     build:
