@@ -57,9 +57,11 @@ def process_download_job(self, job_id: str):
 
 
 @celery_app.task(name="download.simple")
-async def download_simple(job_id: str):
+def download_simple(job_id: str):
     """
     Single-request download for small datasets.
+
+    Note: Celery tasks must be synchronous. Use asyncio.run() for async code.
 
     Args:
         job_id: UUID of the DownloadJob
@@ -67,6 +69,7 @@ async def download_simple(job_id: str):
     Returns:
         Download result dict
     """
+    import asyncio
     from ..services.download import DownloadService
 
     with get_db_session() as db:
@@ -83,12 +86,13 @@ async def download_simple(job_id: str):
             job.current_stage = "downloading"
             db.commit()
 
-            result = await download_service.download_and_cache(
+            # Run async code in event loop
+            result = asyncio.run(download_service.download_and_cache(
                 dataset_id=dataset.id,
                 geometry=job.params.get("geometry"),
                 format=job.params.get("format", "geojson"),
                 job_id=UUID(job_id),
-            )
+            ))
 
             # Mark job as completed
             job.status = JobStatus.COMPLETED
@@ -111,10 +115,12 @@ async def download_simple(job_id: str):
 
 
 @celery_app.task(name="download.paged")
-async def download_paged(job_id: str):
+def download_paged(job_id: str):
     """
     Sequential paged download for medium datasets.
     Uses async pagination within single task.
+
+    Note: Celery tasks must be synchronous. Use asyncio.run() for async code.
 
     Args:
         job_id: UUID of the DownloadJob
@@ -122,6 +128,7 @@ async def download_paged(job_id: str):
     Returns:
         Download result dict
     """
+    import asyncio
     from ..services.download import DownloadService
 
     with get_db_session() as db:
@@ -138,12 +145,13 @@ async def download_paged(job_id: str):
             job.current_stage = "downloading"
             db.commit()
 
-            result = await download_service.download_and_cache(
+            # Run async code in event loop
+            result = asyncio.run(download_service.download_and_cache(
                 dataset_id=dataset.id,
                 geometry=job.params.get("geometry"),
                 format=job.params.get("format", "geojson"),
                 job_id=UUID(job_id),
-            )
+            ))
 
             # Mark job as completed
             job.status = JobStatus.COMPLETED

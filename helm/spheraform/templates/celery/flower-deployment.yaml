@@ -1,0 +1,58 @@
+{{- if .Values.celery.flower.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spheraform.fullname" . }}-flower
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: flower
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "spheraform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: flower
+  template:
+    metadata:
+      labels:
+        {{- include "spheraform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: flower
+    spec:
+      containers:
+      - name: flower
+        image: {{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}
+        imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+        command:
+          - celery
+          - -A
+          - spheraform_api.celery_app
+          - flower
+          - --port={{ .Values.celery.flower.port }}
+        env:
+          - name: CELERY_BROKER_URL
+            value: "redis://{{ include "spheraform.fullname" . }}-redis:6379/0"
+        ports:
+          - name: http
+            containerPort: {{ .Values.celery.flower.port }}
+            protocol: TCP
+        resources:
+          {{- toYaml .Values.celery.flower.resources | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "spheraform.fullname" . }}-flower
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: flower
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.celery.flower.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "spheraform.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: flower
+{{- end }}

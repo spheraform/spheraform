@@ -200,6 +200,8 @@ api:
     MIN_FEATURES_FOR_OBJECT_STORAGE: "10000"
     PMTILES_MAX_ZOOM: "14"
     POSTGIS_CACHE_RETENTION_DAYS: "30"
+    # Celery configuration
+    USE_CELERY: "true"
   livenessProbe:
     enabled: true
     path: /health
@@ -210,6 +212,55 @@ api:
     path: /health
     initialDelaySeconds: 10
     periodSeconds: 5
+
+# Celery distributed task processing
+celery:
+  logLevel: info
+
+  downloadWorker:
+    enabled: true
+    replicas: 2
+    concurrency: 4  # Tasks per worker
+    resources:
+      requests:
+        memory: "1Gi"    # Increased for large dataset handling
+        cpu: "500m"
+      limits:
+        memory: "4Gi"    # Increased from 2Gi to handle large datasets
+        cpu: "2000m"
+
+  crawlWorker:
+    enabled: true
+    replicas: 1
+    concurrency: 2
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "250m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
+
+  beat:
+    enabled: true
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+
+  flower:
+    enabled: true
+    port: 5555
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
 
 # Spheraform Web UI
 web:

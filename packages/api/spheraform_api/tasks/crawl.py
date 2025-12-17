@@ -76,7 +76,13 @@ def process_crawl_job(self, crawl_job_id: str):
 
 
 @celery_app.task(name="crawl.discover_services")
-async def discover_services(base_url: str, server_id: str) -> list[str]:
+def discover_services(base_url: str, server_id: str) -> list[str]:
+    """Run async discovery in sync Celery task."""
+    import asyncio
+    return asyncio.run(_discover_services_async(base_url, server_id))
+
+
+async def _discover_services_async(base_url: str, server_id: str) -> list[str]:
     """
     Discover all service URLs from ArcGIS server.
 
@@ -121,7 +127,13 @@ async def discover_services(base_url: str, server_id: str) -> list[str]:
 
 
 @celery_app.task(name="crawl.process_service", bind=True, max_retries=3)
-async def process_service(self, crawl_job_id: str, service_url: str):
+def process_service(self, crawl_job_id: str, service_url: str):
+    """Run async service processing in sync Celery task."""
+    import asyncio
+    return asyncio.run(_process_service_async(self, crawl_job_id, service_url))
+
+
+async def _process_service_async(self, crawl_job_id: str, service_url: str):
     """
     Process single service: discover layers and store datasets.
     Runs in parallel across multiple workers.

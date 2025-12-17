@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from .routers import servers, datasets, search, download
 from .workers.download_worker import start_worker_thread
 from .workers.crawl_worker import start_crawl_worker_thread
+from spheraform_core.config import settings
 
 # Structured logging config that writes to stdout so Docker captures it reliably
 LOGGING_CONFIG = {
@@ -79,9 +80,14 @@ async def startup_event():
         logger.warning("DATABASE_URL not set, background workers will not start")
         return
 
-    logger.info("Starting background workers")
-    start_worker_thread(database_url)
-    start_crawl_worker_thread(database_url)
+    # Only start legacy polling workers if Celery is disabled
+    if settings.use_celery:
+        logger.info("Celery mode enabled - using distributed workers instead of polling threads")
+        logger.info("Background polling workers will NOT start")
+    else:
+        logger.info("Starting legacy background polling workers")
+        start_worker_thread(database_url)
+        start_crawl_worker_thread(database_url)
 
 
 @app.get("/")

@@ -11,6 +11,7 @@ from ..dependencies import get_db
 from ..schemas import ServerCreate, ServerUpdate, ServerResponse, CrawlJobResponse
 from spheraform_core.models import Geoserver, HealthStatus, Dataset, ProviderType, CrawlJob, JobStatus
 from spheraform_core.adapters import ArcGISAdapter
+from spheraform_core.config import settings
 
 router = APIRouter()
 logger = logging.getLogger("gunicorn.error")
@@ -147,6 +148,17 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
 
     logger.info(f"Created crawl job {job.id} for server {server_id}")
 
+    # Use Celery distributed workers if enabled
+    if settings.use_celery:
+        from ..tasks.crawl import process_crawl_job
+
+        logger.info(f"Dispatching crawl job {job.id} to Celery worker")
+
+        # Submit to Celery queue
+        task = process_crawl_job.delay(str(job.id))
+        job.celery_task_id = task.id
+        db.commit()
+
     return CrawlJobResponse(
         id=job.id,
         geoserver_id=job.geoserver_id,
@@ -181,6 +193,22 @@ async def get_latest_crawl_job(server_id: UUID, db: Session = Depends(get_db)):
             detail=f"No crawl jobs found for server {server_id}",
         )
 
+    # If using Celery and job has a task ID, check Celery state
+    if settings.use_celery and job.celery_task_id:
+        try:
+            from ..celery_app import celery_app
+            task = celery_app.AsyncResult(job.celery_task_id)
+            celery_state = task.state
+
+            # Sync database status with Celery state if needed
+            if celery_state == "STARTED" and job.status == JobStatus.PENDING:
+                job.status = JobStatus.RUNNING
+                if not job.started_at:
+                    job.started_at = datetime.utcnow()
+                db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to get Celery task state for crawl job {job.id}: {e}")
+
     progress = None
 
     return CrawlJobResponse(
@@ -210,6 +238,25 @@ async def get_crawl_status(job_id: UUID, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Crawl job {job_id} not found",
         )
+
+    # If using Celery and job has a task ID, check Celery state
+    celery_state = None
+    if settings.use_celery and job.celery_task_id:
+        try:
+            from ..celery_app import celery_app
+            task = celery_app.AsyncResult(job.celery_task_id)
+            celery_state = task.state
+
+            # If Celery shows task is running but DB shows pending, sync the status
+            if celery_state == "STARTED" and job.status == JobStatus.PENDING:
+                job.status = JobStatus.RUNNING
+                if not job.started_at:
+                    job.started_at = datetime.utcnow()
+                db.commit()
+
+            logger.debug(f"Crawl job {job_id} - Celery state: {celery_state}, DB status: {job.status}")
+        except Exception as e:
+            logger.warning(f"Failed to get Celery task state for crawl job {job_id}: {e}")
 
     # Note: We don't calculate progress percentage for crawl jobs because
     # we don't know the total number of datasets upfront (only services).
@@ -251,6 +298,15 @@ async def cancel_crawl_job(job_id: UUID, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot cancel job with status {job.status.value}",
         )
+
+    # If using Celery, revoke the task
+    if settings.use_celery and job.celery_task_id:
+        try:
+            from ..celery_app import celery_app
+            celery_app.control.revoke(job.celery_task_id, terminate=True)
+            logger.info(f"Revoked Celery task {job.celery_task_id} for crawl job {job_id}")
+        except Exception as e:
+            logger.warning(f"Failed to revoke Celery task {job.celery_task_id}: {e}")
 
     # Mark job as cancelled
     job.status = JobStatus.CANCELLED

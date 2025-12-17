@@ -13,6 +13,8 @@ from ..dependencies import get_db
 from ..schemas import DownloadRequest, DownloadResponse, JobStatusResponse, DownloadJobProgressResponse
 from spheraform_core.models import Dataset, DownloadJob, JobStatus, Geoserver, ProviderType, DownloadStrategy
 from spheraform_core.adapters import ArcGISAdapter
+from spheraform_core.config import settings
+
 
 logger = logging.getLogger("gunicorn.error")
 router = APIRouter()
@@ -82,7 +84,23 @@ async def download_datasets(request: DownloadRequest, db: Session = Depends(get_
 
     logger.info(f"Created download job {job.id} for dataset {dataset.id}")
 
-    # Check if this requires async processing (background worker)
+    # Use Celery distributed workers if enabled
+    if settings.use_celery:
+        from ..tasks.download import process_download_job
+
+        logger.info(f"Dispatching download job {job.id} to Celery worker")
+
+        # Submit to Celery queue
+        task = process_download_job.delay(str(job.id))
+        job.celery_task_id = task.id
+        db.commit()
+
+        return DownloadResponse(
+            job_id=job.id,
+            status="queued",
+        )
+
+    # Legacy mode: Check if this requires async processing (background worker)
     needs_async = dataset.download_strategy in [DownloadStrategy.CHUNKED, DownloadStrategy.DISTRIBUTED]
 
     if needs_async:
@@ -155,6 +173,22 @@ async def get_latest_download_job(dataset_id: UUID, db: Session = Depends(get_db
             detail=f"No download jobs found for dataset {dataset_id}",
         )
 
+    # If using Celery and job has a task ID, check Celery state
+    if settings.use_celery and job.celery_task_id:
+        try:
+            from ..celery_app import celery_app
+            task = celery_app.AsyncResult(job.celery_task_id)
+            celery_state = task.state
+
+            # Sync database status with Celery state if needed
+            if celery_state == "STARTED" and job.status == JobStatus.PENDING:
+                job.status = JobStatus.RUNNING
+                if not job.started_at:
+                    job.started_at = datetime.utcnow()
+                db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to get Celery task state for job {job.id}: {e}")
+
     # Calculate stage-based progress
     progress = None
     if job.current_stage == "downloading" and job.total_features:
@@ -199,6 +233,25 @@ async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job {job_id} not found",
         )
+
+    # If using Celery and job has a task ID, check Celery state
+    celery_state = None
+    if settings.use_celery and job.celery_task_id:
+        try:
+            from ..celery_app import celery_app
+            task = celery_app.AsyncResult(job.celery_task_id)
+            celery_state = task.state
+
+            # If Celery shows task is running but DB shows pending, sync the status
+            if celery_state == "STARTED" and job.status == JobStatus.PENDING:
+                job.status = JobStatus.RUNNING
+                if not job.started_at:
+                    job.started_at = datetime.utcnow()
+                db.commit()
+
+            logger.debug(f"Job {job_id} - Celery state: {celery_state}, DB status: {job.status}")
+        except Exception as e:
+            logger.warning(f"Failed to get Celery task state for job {job_id}: {e}")
 
     # Calculate stage-based progress
     progress = None
@@ -251,6 +304,15 @@ async def cancel_download_job(job_id: UUID, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot cancel job with status {job.status.value}",
         )
+
+    # If using Celery, revoke the task
+    if settings.use_celery and job.celery_task_id:
+        try:
+            from ..celery_app import celery_app
+            celery_app.control.revoke(job.celery_task_id, terminate=True)
+            logger.info(f"Revoked Celery task {job.celery_task_id} for job {job_id}")
+        except Exception as e:
+            logger.warning(f"Failed to revoke Celery task {job.celery_task_id}: {e}")
 
     # Mark job as cancelled
     job.status = JobStatus.CANCELLED

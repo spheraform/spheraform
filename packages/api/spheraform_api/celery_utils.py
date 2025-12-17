@@ -7,8 +7,15 @@ from spheraform_core.config import settings
 
 # Thread-safe session factory for workers
 # Each worker process gets its own connection pool
+# Use psycopg (v3) driver explicitly since psycopg2 is not installed
+database_url = settings.database_url
+if database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+elif database_url.startswith("postgresql+psycopg2://"):
+    database_url = database_url.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+
 engine = create_engine(
-    settings.database_url,
+    database_url,
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,  # Validate connections before using
