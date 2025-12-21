@@ -1,16 +1,29 @@
 import { writable } from 'svelte/store';
 import type { Map } from 'maplibre-gl';
+import maplibregl from 'maplibre-gl';
+import { Protocol } from 'pmtiles';
 
 export interface ActiveDataset {
 	id: string;
 	name: string;
 	color: string;
-	cacheTable: string;
+	pmtilesUrl: string;
 }
 
 export interface MapStore {
 	map: Map | null;
 	activeDatasets: ActiveDataset[];
+}
+
+// Initialize PMTiles protocol once
+let pmtilesProtocolAdded = false;
+
+function initPMTilesProtocol() {
+	if (!pmtilesProtocolAdded) {
+		const protocol = new Protocol();
+		maplibregl.addProtocol('pmtiles', protocol.tile);
+		pmtilesProtocolAdded = true;
+	}
 }
 
 // Generate a truly random color
@@ -29,9 +42,12 @@ function createMapStore() {
 	return {
 		subscribe,
 		setMap: (map: Map) => update(state => ({ ...state, map })),
-		addLayer: (datasetId: string, datasetName: string, cacheTable: string, geometryType?: string, martinUrl = 'http://localhost:3000') => {
+		addLayer: (datasetId: string, datasetName: string, pmtilesUrl: string, geometryType?: string) => {
 			update(state => {
 				if (!state.map) return state;
+
+				// Initialize PMTiles protocol
+				initPMTilesProtocol();
 
 				const map = state.map;
 				const sourceId = `dataset-${datasetId}`;
@@ -51,13 +67,16 @@ function createMapStore() {
 					map.removeSource(sourceId);
 				}
 
-				// Add vector tile source from Martin
+				// Add PMTiles vector source
 				map.addSource(sourceId, {
 					type: 'vector',
-					tiles: [`${martinUrl}/${cacheTable}/{z}/{x}/{y}`],
+					url: `pmtiles://${pmtilesUrl}`,
 					minzoom: 0,
 					maxzoom: 14
 				});
+
+				// Source layer name is the dataset ID (set during PMTiles generation)
+				const sourceLayer = datasetId;
 
 				// Normalize geometry type (handle variations like "Point", "esriGeometryPoint", etc.)
 				const normalizedType = geometryType?.toLowerCase() || '';
@@ -71,7 +90,7 @@ function createMapStore() {
 						id: layerId,
 						type: 'circle',
 						source: sourceId,
-						'source-layer': cacheTable,
+						'source-layer': sourceLayer,
 						minzoom: 0,
 						maxzoom: 22,
 						paint: {
@@ -98,7 +117,7 @@ function createMapStore() {
 						id: isLine ? layerId : `${layerId}-line`,
 						type: 'line',
 						source: sourceId,
-						'source-layer': cacheTable,
+						'source-layer': sourceLayer,
 						minzoom: 0,
 						maxzoom: 22,
 						paint: {
@@ -114,7 +133,7 @@ function createMapStore() {
 						id: `${layerId}-fill`,
 						type: 'fill',
 						source: sourceId,
-						'source-layer': cacheTable,
+						'source-layer': sourceLayer,
 						minzoom: 0,
 						maxzoom: 22,
 						paint: {
@@ -127,7 +146,7 @@ function createMapStore() {
 						id: `${layerId}-outline`,
 						type: 'line',
 						source: sourceId,
-						'source-layer': cacheTable,
+						'source-layer': sourceLayer,
 						minzoom: 0,
 						maxzoom: 22,
 						paint: {
@@ -141,10 +160,10 @@ function createMapStore() {
 				const existingIndex = state.activeDatasets.findIndex(d => d.id === datasetId);
 				if (existingIndex >= 0) {
 					// Update existing entry with new color
-					state.activeDatasets[existingIndex] = { id: datasetId, name: datasetName, color, cacheTable };
+					state.activeDatasets[existingIndex] = { id: datasetId, name: datasetName, color, pmtilesUrl };
 				} else {
 					// Add new entry
-					state.activeDatasets = [...state.activeDatasets, { id: datasetId, name: datasetName, color, cacheTable }];
+					state.activeDatasets = [...state.activeDatasets, { id: datasetId, name: datasetName, color, pmtilesUrl }];
 				}
 
 				return state;

@@ -132,6 +132,13 @@ class Dataset(Base, UUIDMixin, TimestampMixin):
         Integer, nullable=True
     )  # Number of row groups in Parquet file
 
+    # PMTiles Generation Tracking
+    pmtiles_generated: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, index=True
+    )
+    pmtiles_generated_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    pmtiles_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     # Download Strategy
     download_strategy: Mapped[DownloadStrategy] = mapped_column(
         SQLEnum(DownloadStrategy, name="download_strategy", values_callable=lambda x: [e.value for e in x]),

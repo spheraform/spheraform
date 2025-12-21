@@ -37,6 +37,66 @@ class Settings(BaseSettings):
     s3_bucket: str = Field(default="geodata", description="S3 bucket name")
     s3_region: str = Field(default="us-east-1", description="S3 region")
 
+    # Cloudflare R2 (Production object storage)
+    r2_account_id: Optional[str] = Field(
+        default=None,
+        description="Cloudflare R2 account ID (if using R2 instead of MinIO/S3)",
+    )
+    r2_access_key: Optional[str] = Field(
+        default=None, description="Cloudflare R2 access key"
+    )
+    r2_secret_key: Optional[str] = Field(
+        default=None, description="Cloudflare R2 secret key"
+    )
+    r2_bucket: Optional[str] = Field(
+        default=None, description="Cloudflare R2 bucket name"
+    )
+    r2_public_url: Optional[str] = Field(
+        default=None,
+        description="Cloudflare R2 public URL (e.g., https://pub-xxx.r2.dev)",
+    )
+
+    # PMTiles Generation Settings
+    pmtiles_max_zoom: int = Field(
+        default=14, description="Maximum zoom level for PMTiles generation"
+    )
+    pmtiles_min_zoom: int = Field(
+        default=0, description="Minimum zoom level for PMTiles generation"
+    )
+
+    @property
+    def is_r2(self) -> bool:
+        """Check if Cloudflare R2 is configured."""
+        return self.r2_account_id is not None
+
+    @property
+    def s3_endpoint_url(self) -> str:
+        """Get the correct S3 endpoint URL (R2 or MinIO/S3)."""
+        if self.is_r2:
+            return f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
+        return self.s3_endpoint
+
+    @property
+    def storage_bucket(self) -> str:
+        """Get the correct storage bucket name (R2 or S3)."""
+        if self.is_r2:
+            return self.r2_bucket or self.s3_bucket
+        return self.s3_bucket
+
+    @property
+    def storage_access_key(self) -> str:
+        """Get the correct storage access key (R2 or S3)."""
+        if self.is_r2:
+            return self.r2_access_key or self.s3_access_key
+        return self.s3_access_key
+
+    @property
+    def storage_secret_key(self) -> str:
+        """Get the correct storage secret key (R2 or S3)."""
+        if self.is_r2:
+            return self.r2_secret_key or self.s3_secret_key
+        return self.s3_secret_key
+
     # Paths
     data_dir: str = Field(
         default="/tmp/spheraform/data", description="Local data directory"

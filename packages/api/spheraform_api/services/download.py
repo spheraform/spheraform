@@ -203,11 +203,54 @@ class DownloadService:
                         # Add object storage metadata
                         dataset.use_s3_storage = True
                         dataset.s3_data_key = s3_result["s3_data_key"]
-                        dataset.s3_tiles_key = s3_result["s3_tiles_key"]
                         dataset.parquet_schema = s3_result.get("parquet_schema")
 
-                        # Total size is PostGIS + object storage
-                        dataset.cache_size_bytes = postgis_result["size_bytes"] + s3_result["size_bytes"]
+                        # Generate PMTiles for ALL datasets in object storage
+                        logger.info(f"Generating PMTiles for {dataset.name}")
+
+                        import tempfile
+                        with tempfile.TemporaryDirectory() as pmtiles_temp_dir:
+                            pmtiles_path = Path(pmtiles_temp_dir) / "tiles.pmtiles"
+
+                            # Adaptive zoom levels based on feature count
+                            max_zoom = 14 if result.feature_count < 100000 else 12
+
+                            from spheraform_core.storage.pmtiles_gen import generate_from_geojson
+                            pmtiles_metadata = generate_from_geojson(
+                                geojson_path=temp_path,
+                                pmtiles_path=pmtiles_path,
+                                min_zoom=0,
+                                max_zoom=max_zoom,
+                                layer_name=str(dataset_id),
+                                simplification=10,
+                                buffer=64,
+                            )
+
+                            # Upload to S3
+                            tiles_key = f"datasets/{dataset_id}/tiles.pmtiles"
+                            await s3_backend.s3_client.upload_file(
+                                pmtiles_path,
+                                tiles_key,
+                                metadata={
+                                    "min_zoom": str(pmtiles_metadata["min_zoom"]),
+                                    "max_zoom": str(pmtiles_metadata["max_zoom"]),
+                                    "layer_name": pmtiles_metadata["layer_name"],
+                                },
+                            )
+
+                            # Get PMTiles file size
+                            pmtiles_size = pmtiles_path.stat().st_size
+
+                            # Update dataset with PMTiles metadata
+                            dataset.s3_tiles_key = tiles_key
+                            dataset.pmtiles_generated = True
+                            dataset.pmtiles_generated_at = datetime.utcnow()
+                            dataset.pmtiles_size_bytes = pmtiles_size
+
+                            logger.info(f"PMTiles generated: {tiles_key} ({pmtiles_size} bytes)")
+
+                        # Total size is PostGIS + object storage + PMTiles
+                        dataset.cache_size_bytes = postgis_result["size_bytes"] + s3_result["size_bytes"] + dataset.pmtiles_size_bytes
 
                         response = {
                             "success": True,
@@ -215,7 +258,9 @@ class DownloadService:
                             "storage_backend": "hybrid",
                             "cache_table": postgis_result["cache_table"],
                             "s3_data_key": s3_result["s3_data_key"],
-                            "s3_tiles_key": s3_result["s3_tiles_key"],
+                            "s3_tiles_key": dataset.s3_tiles_key,
+                            "pmtiles_generated": dataset.pmtiles_generated,
+                            "pmtiles_size_bytes": dataset.pmtiles_size_bytes,
                             "feature_count": postgis_result["feature_count"],
                             "size_bytes": dataset.cache_size_bytes,
                         }
