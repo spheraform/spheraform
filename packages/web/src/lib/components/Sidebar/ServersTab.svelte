@@ -43,7 +43,14 @@
 	let globalDatasetSearch = '';
 
 	// Track which datasets are currently being fetched
-	let fetchingDatasets: {[datasetId: string]: boolean} = {};
+	let fetchingDatasets: {[datasetId: string]: {
+		progress: number;
+		stage: string;
+		jobId?: string;
+		features_downloaded?: number;
+		total_features?: number;
+		features_stored?: number;
+	}} = {};
 
 	// Function to filter datasets based on global search
 	function filterDatasetsBySearch(datasets: any[]) {
@@ -242,7 +249,10 @@
 							fetchingDatasets[datasetId] = {
 								progress: job.progress || 0,
 								stage: job.current_stage || 'processing',
-								jobId: job.id
+								jobId: job.id,
+								features_downloaded: job.features_downloaded || 0,
+								total_features: job.total_features,
+								features_stored: job.features_stored || 0
 							};
 							fetchingDatasets = { ...fetchingDatasets };
 
@@ -253,7 +263,10 @@
 									fetchingDatasets[datasetId] = {
 										progress: progressJob.progress || 0,
 										stage: progressJob.current_stage || 'processing',
-										jobId: job.id
+										jobId: job.id,
+										features_downloaded: progressJob.features_downloaded || 0,
+										total_features: progressJob.total_features,
+										features_stored: progressJob.features_stored || 0
 									};
 									fetchingDatasets = { ...fetchingDatasets };
 								},
@@ -540,7 +553,10 @@
 								fetchingDatasets[dataset.id] = {
 									progress: progressJob.progress || 0,
 									stage: progressJob.current_stage || 'processing',
-									jobId: data.job_id
+									jobId: data.job_id,
+									features_downloaded: progressJob.features_downloaded || 0,
+									total_features: progressJob.total_features,
+									features_stored: progressJob.features_stored || 0
 								};
 								fetchingDatasets = { ...fetchingDatasets };
 							},
@@ -922,7 +938,7 @@
 															class="icon-btn cancel-btn tooltip-trigger"
 															on:click|stopPropagation={() => cancelFetch(dataset.id)}
 															data-tooltip={fetchingDatasets[dataset.id]
-																? `${fetchingDatasets[dataset.id].stage || 'fetching'}: ${Math.round(fetchingDatasets[dataset.id].progress || 0)}%`
+																? formatJobProgress({...fetchingDatasets[dataset.id], status: 'running'})
 																: "Cancel"}
 														>
 															<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

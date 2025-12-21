@@ -79,6 +79,24 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = Field(default="INFO", description="Logging level")
 
+    # Celery workers (distributed task processing)
+    use_celery: bool = Field(
+        default=False,
+        description="Use Celery workers instead of polling threads (enables horizontal scaling)",
+    )
+    celery_download_workers: int = Field(
+        default=3, description="Number of download worker instances"
+    )
+    celery_download_concurrency: int = Field(
+        default=4, description="Concurrent tasks per download worker"
+    )
+    celery_crawl_workers: int = Field(
+        default=2, description="Number of crawl worker instances"
+    )
+    celery_crawl_concurrency: int = Field(
+        default=2, description="Concurrent tasks per crawl worker"
+    )
+
 
 # Global settings instance
 settings = Settings()

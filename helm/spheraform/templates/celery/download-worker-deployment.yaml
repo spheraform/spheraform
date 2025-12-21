@@ -1,0 +1,58 @@
+{{- if .Values.celery.downloadWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spheraform.fullname" . }}-celery-download
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: celery-download-worker
+spec:
+  replicas: {{ .Values.celery.downloadWorker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "spheraform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: celery-download-worker
+  template:
+    metadata:
+      labels:
+        {{- include "spheraform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: celery-download-worker
+    spec:
+      containers:
+      - name: worker
+        image: {{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}
+        imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+        command:
+          - celery
+          - -A
+          - spheraform_api.celery_app
+          - worker
+          - -Q
+          - downloads
+          - -c
+          - "{{ .Values.celery.downloadWorker.concurrency }}"
+          - -n
+          - download@%h
+          - --loglevel={{ .Values.celery.logLevel }}
+        env:
+          - name: DATABASE_URL
+            value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ include "spheraform.fullname" . }}-postgres:5432/{{ .Values.postgres.database }}"
+          - name: REDIS_URL
+            value: "redis://{{ include "spheraform.fullname" . }}-redis:6379/0"
+          - name: S3_ENDPOINT
+            value: "http://{{ include "spheraform.fullname" . }}-minio:9000"
+          - name: S3_ACCESS_KEY
+            value: {{ .Values.minio.rootUser }}
+          - name: S3_SECRET_KEY
+            value: {{ .Values.minio.rootPassword }}
+          - name: S3_BUCKET
+            value: {{ .Values.minio.bucket }}
+          - name: USE_CELERY
+            value: "true"
+          {{- range $key, $value := .Values.api.env }}
+          - name: {{ $key }}
+            value: {{ $value | quote }}
+          {{- end }}
+        resources:
+          {{- toYaml .Values.celery.downloadWorker.resources | nindent 10 }}
+{{- end }}

@@ -78,6 +78,7 @@ class DownloadService:
         geometry: Optional[dict] = None,
         format: str = "geojson",
         job_id: Optional[UUID] = None,
+        progress_callback: Optional[callable] = None,
     ) -> dict:
         """
         Download dataset and cache it in PostGIS.
@@ -136,6 +137,7 @@ class DownloadService:
                             max_records=max_records,
                             geometry=geometry,
                             format=format,
+                            progress_callback=progress_callback,
                         )
                     elif dataset.download_strategy == DownloadStrategy.PAGED:
                         logger.info(f"Using paged download for {dataset.name}")
@@ -145,6 +147,7 @@ class DownloadService:
                             max_records=max_records,
                             geometry=geometry,
                             format=format,
+                            progress_callback=progress_callback,
                         )
                     else:
                         # Default to paged for compatibility
@@ -155,6 +158,7 @@ class DownloadService:
                             max_records=max_records,
                             geometry=geometry,
                             format=format,
+                            progress_callback=progress_callback,
                         )
 
                     if not result.success:
@@ -162,13 +166,8 @@ class DownloadService:
 
                     logger.info(f"Downloaded {result.feature_count} features to {temp_path}")
 
-                    # Load GeoJSON from temp file
-                    with open(temp_path, 'r') as f:
-                        geojson_data = json.load(f)
-
-                    # Check if GeoJSON has features
-                    features = geojson_data.get("features", [])
-                    if not features or len(features) == 0:
+                    # Validate feature count from download result (avoid loading entire file into memory)
+                    if not result.feature_count or result.feature_count == 0:
                         raise Exception(f"Download returned 0 features - dataset may be unavailable or query unsupported by server")
 
                     # Determine storage backend - hybrid approach for large datasets

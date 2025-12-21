@@ -70,6 +70,11 @@ class DownloadJob(Base, UUIDMixin, TimestampMixin):
         index=True,
     )
 
+    # Celery task tracking (for distributed workers)
+    celery_task_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+
     # Download strategy
     strategy: Mapped[str] = mapped_column(
         String(50), nullable=False
@@ -203,6 +208,11 @@ class ExportJob(Base, UUIDMixin, TimestampMixin):
         index=True,
     )
 
+    # Celery task tracking (for distributed workers)
+    celery_task_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+
     # Timing
     started_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
@@ -252,6 +262,11 @@ class CrawlJob(Base, UUIDMixin, TimestampMixin):
         default=JobStatus.PENDING,
         nullable=False,
         index=True,
+    )
+
+    # Celery task tracking (for distributed workers)
+    celery_task_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
     )
 
     # Progress tracking

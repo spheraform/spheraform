@@ -1,0 +1,40 @@
+{{- if .Values.celery.beat.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spheraform.fullname" . }}-celery-beat
+  labels:
+    {{- include "spheraform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: celery-beat
+spec:
+  replicas: 1  # Only one beat instance should run
+  selector:
+    matchLabels:
+      {{- include "spheraform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: celery-beat
+  template:
+    metadata:
+      labels:
+        {{- include "spheraform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: celery-beat
+    spec:
+      containers:
+      - name: beat
+        image: {{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}
+        imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+        command:
+          - celery
+          - -A
+          - spheraform_api.celery_app
+          - beat
+          - --loglevel={{ .Values.celery.logLevel }}
+        env:
+          - name: DATABASE_URL
+            value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ include "spheraform.fullname" . }}-postgres:5432/{{ .Values.postgres.database }}"
+          - name: REDIS_URL
+            value: "redis://{{ include "spheraform.fullname" . }}-redis:6379/0"
+          - name: USE_CELERY
+            value: "true"
+        resources:
+          {{- toYaml .Values.celery.beat.resources | nindent 10 }}
+{{- end }}

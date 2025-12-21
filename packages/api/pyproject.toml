@@ -10,7 +10,8 @@ dependencies = [
     "uvicorn[standard]>=0.27",
     "python-multipart>=0.0.6",  # For file uploads
     "redis>=5.0",
-    "celery>=5.3",  # For background jobs
+    "celery>=5.3",  # For distributed task processing
+    "flower>=2.0",  # Celery monitoring dashboard
     "pydantic>=2.5",
     "pydantic-settings>=2.1",
 ]

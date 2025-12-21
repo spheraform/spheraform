@@ -103,10 +103,9 @@ class DownloadWorker:
         if not geoserver:
             raise ValueError(f"Geoserver {dataset.geoserver_id} not found")
 
-        # Create adapter
+        # Create adapter using the dataset's access_url (full layer endpoint)
         adapter = ArcGISAdapter(
-            base_url=geoserver.base_url,
-            layer_id=dataset.layer_id,
+            base_url=dataset.access_url,
         )
 
         # Download data

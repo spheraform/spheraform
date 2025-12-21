@@ -98,6 +98,31 @@ k8s_resource(
     labels=['storage'],
 )
 
+k8s_resource(
+    'spheraform-celery-download',
+    labels=['celery'],
+    resource_deps=['spheraform-postgres', 'spheraform-redis', 'spheraform-minio'],
+)
+
+k8s_resource(
+    'spheraform-celery-crawl',
+    labels=['celery'],
+    resource_deps=['spheraform-postgres', 'spheraform-redis'],
+)
+
+k8s_resource(
+    'spheraform-celery-beat',
+    labels=['celery'],
+    resource_deps=['spheraform-postgres', 'spheraform-redis'],
+)
+
+k8s_resource(
+    'spheraform-flower',
+    port_forwards='5555:5555',
+    labels=['celery'],
+    resource_deps=['spheraform-redis'],
+)
+
 # Custom buttons for Tilt UI
 local_resource(
     'helm-lint',
@@ -178,9 +203,16 @@ Services:
   • Web UI:      http://localhost:5173
   • API:         http://localhost:8000/docs
   • Martin:      http://localhost:3000
+  • Flower:      http://localhost:5555 (Celery monitoring)
   • MinIO:       http://localhost:9001 (minioadmin/minioadmin)
   • PostgreSQL:  localhost:5432
   • Redis:       localhost:6379
+
+Celery Workers:
+  • Download workers: 2 replicas, 4 concurrency each
+  • Crawl worker:     1 replica, 2 concurrency
+  • Beat scheduler:   Periodic tasks
+  • Flower:           Task monitoring UI
 
 Press 'space' to open Tilt UI
 
