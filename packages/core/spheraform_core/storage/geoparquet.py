@@ -52,44 +52,46 @@ def geojson_to_geoparquet(
     parquet_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Read GeoJSON and convert to GeoParquet using Fiona for streaming
-    with fiona.open(geojson_path, "r") as src:
-        total_features = len(src)
-        logger.info(f"Converting {total_features} features to GeoParquet")
+    # Set OGR_GEOJSON_MAX_OBJ_SIZE to 0 to remove size limit for large GeoJSON files
+    with fiona.Env(OGR_GEOJSON_MAX_OBJ_SIZE=0):
+        with fiona.open(geojson_path, "r") as src:
+            total_features = len(src)
+            logger.info(f"Converting {total_features} features to GeoParquet")
 
-        # Get CRS and schema
-        crs = src.crs
-        if crs:
-            # Fiona CRS is a CRS object, not a dict
-            source_crs = crs.to_string() if hasattr(crs, 'to_string') else str(crs)
-        else:
-            source_crs = "EPSG:4326"
+            # Get CRS and schema
+            crs = src.crs
+            if crs:
+                # Fiona CRS is a CRS object, not a dict
+                source_crs = crs.to_string() if hasattr(crs, 'to_string') else str(crs)
+            else:
+                source_crs = "EPSG:4326"
 
-        # Setup reprojection to EPSG:4326 if needed
-        if source_crs.lower() != "epsg:4326":
-            logger.info(f"Reprojecting from {source_crs} to EPSG:4326")
-            project = pyproj.Transformer.from_crs(
-                source_crs, "EPSG:4326", always_xy=True
-            ).transform
-        else:
-            project = None
+            # Setup reprojection to EPSG:4326 if needed
+            if source_crs.lower() != "epsg:4326":
+                logger.info(f"Reprojecting from {source_crs} to EPSG:4326")
+                project = pyproj.Transformer.from_crs(
+                    source_crs, "EPSG:4326", always_xy=True
+                ).transform
+            else:
+                project = None
 
-        # Build schema from first feature
-        first_feature = next(iter(src))
-        schema = _build_arrow_schema(first_feature)
+            # Build schema from first feature
+            first_feature = next(iter(src))
+            schema = _build_arrow_schema(first_feature)
 
-        # Determine if we should stream
-        use_streaming = total_features > STREAMING_THRESHOLD
+            # Determine if we should stream
+            use_streaming = total_features > STREAMING_THRESHOLD
 
-        if use_streaming:
-            logger.info(f"Using streaming mode (batch_size={batch_size})")
-            _write_parquet_streaming(
-                src, parquet_path, schema, compression, batch_size, project
-            )
-        else:
-            logger.info("Using in-memory conversion")
-            _write_parquet_inmemory(
-                src, parquet_path, schema, compression, project
-            )
+            if use_streaming:
+                logger.info(f"Using streaming mode (batch_size={batch_size})")
+                _write_parquet_streaming(
+                    src, parquet_path, schema, compression, batch_size, project
+                )
+            else:
+                logger.info("Using in-memory conversion")
+                _write_parquet_inmemory(
+                    src, parquet_path, schema, compression, project
+                )
 
     # Get file size
     size_bytes = parquet_path.stat().st_size

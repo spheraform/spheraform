@@ -78,7 +78,7 @@ class PostGISStorageBackend(StorageBackend):
         job_id: Optional[UUID] = None,
     ) -> dict:
         """
-        Store dataset in PostGIS table.
+        Store dataset in PostGIS table using streaming to avoid memory issues.
 
         Args:
             dataset_id: Dataset UUID
@@ -93,20 +93,15 @@ class PostGISStorageBackend(StorageBackend):
         # Create cache table name
         cache_table = f"cache_{dataset_id.hex}"
 
-        # Load GeoJSON
-        with open(geojson_path, "r") as f:
-            geojson_data = json.load(f)
-
-        # Store in PostGIS
-        await self._store_in_postgis(
+        # Store in PostGIS using streaming (no full file load into memory)
+        feature_count = await self._store_in_postgis_streaming(
             cache_table=cache_table,
-            geojson_data=geojson_data,
+            geojson_path=geojson_path,
             job_id=job_id,
         )
 
         # Get file size
         size_bytes = geojson_path.stat().st_size
-        feature_count = len(geojson_data.get("features", []))
 
         return {
             "cache_table": cache_table,
@@ -294,6 +289,132 @@ class PostGISStorageBackend(StorageBackend):
 
         self.db.commit()
         logger.info(f"Successfully stored {total_features:,} features in {cache_table}")
+
+    async def _store_in_postgis_streaming(
+        self,
+        cache_table: str,
+        geojson_path: Path,
+        job_id: Optional[UUID] = None,
+    ) -> int:
+        """
+        Store GeoJSON data in PostGIS table using streaming parser (ijson).
+        Avoids loading entire file into memory for large datasets.
+
+        Args:
+            cache_table: Name of the cache table
+            geojson_path: Path to GeoJSON file
+            job_id: Optional DownloadJob ID for progress updates
+
+        Returns:
+            Total feature count
+        """
+        import ijson
+
+        # Drop table if it exists
+        self.db.execute(text(f"DROP TABLE IF EXISTS {cache_table}"))
+
+        # Create table with SRID 3857 (Web Mercator) for Martin tile server
+        create_table_sql = f"""
+        CREATE TABLE {cache_table} (
+            id SERIAL PRIMARY KEY,
+            geom GEOMETRY(Geometry, 3857),
+            properties JSONB
+        )
+        """
+        self.db.execute(text(create_table_sql))
+
+        logger.info(f"Streaming GeoJSON to PostGIS table {cache_table}")
+
+        # Update job stage
+        if job_id:
+            job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+            if job:
+                job.current_stage = "storing"
+                self.db.commit()
+
+        # Stream parse features using ijson (no full file load)
+        feature_count = 0
+        batch = []
+        batch_size = 1000
+
+        with open(geojson_path, "rb") as f:
+            # Parse features array from GeoJSON
+            features = ijson.items(f, "features.item")
+
+            for feature in features:
+                # Check if job was cancelled
+                if job_id and feature_count % 1000 == 0:
+                    job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+                    if job and job.status == JobStatus.CANCELLED:
+                        logger.info(f"Download job {job_id} was cancelled, stopping storage")
+                        self.db.execute(text(f"DROP TABLE IF EXISTS {cache_table}"))
+                        self.db.commit()
+                        return feature_count
+
+                batch.append(feature)
+                feature_count += 1
+
+                # Insert batch when full
+                if len(batch) >= batch_size:
+                    self._insert_batch(cache_table, batch)
+                    batch = []
+
+                    # Update progress
+                    if job_id:
+                        job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+                        if job:
+                            if not job.total_features:
+                                job.total_features = feature_count  # Will be updated as we stream
+                            job.features_stored = feature_count
+                            self.db.commit()
+
+                    # Log progress every 10k features
+                    if feature_count % 10000 == 0:
+                        logger.info(f"Streamed {feature_count:,} features to PostGIS")
+
+            # Insert remaining features
+            if batch:
+                self._insert_batch(cache_table, batch)
+
+        # Update final feature count
+        if job_id:
+            job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+            if job:
+                job.total_features = feature_count
+                job.features_stored = feature_count
+                self.db.commit()
+
+        # Create spatial index
+        if job_id:
+            job = self.db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
+            if job:
+                job.current_stage = "indexing"
+                self.db.commit()
+
+        logger.info(f"Creating spatial index on {cache_table}")
+        self.db.execute(text(f"CREATE INDEX {cache_table}_geom_idx ON {cache_table} USING GIST (geom)"))
+        self.db.commit()
+
+        logger.info(f"Successfully stored {feature_count:,} features in {cache_table}")
+        return feature_count
+
+    def _insert_batch(self, cache_table: str, batch: list):
+        """Insert a batch of features into PostGIS table."""
+        for feature in batch:
+            geometry_json = json.dumps(feature.get("geometry"))
+            properties_json = json.dumps(feature.get("properties", {}))
+
+            # Transform from 4326 (WGS84) to 3857 (Web Mercator) for Martin
+            insert_sql = f"""
+            INSERT INTO {cache_table} (geom, properties)
+            VALUES (
+                ST_Transform(ST_GeomFromGeoJSON(:geometry), 3857),
+                CAST(:properties AS jsonb)
+            )
+            """
+            self.db.execute(
+                text(insert_sql), {"geometry": geometry_json, "properties": properties_json}
+            )
 
 
 class S3StorageBackend(StorageBackend):

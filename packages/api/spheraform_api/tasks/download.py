@@ -86,12 +86,28 @@ def download_simple(job_id: str):
             job.current_stage = "downloading"
             db.commit()
 
+            # Create progress callback that updates database
+            def update_progress(current: int, total: int):
+                """Update job progress in database."""
+                logger.info(f"Progress callback invoked: {current}/{total} features")
+                if not job.total_features:
+                    job.total_features = total
+                    logger.info(f"Set total_features to {total}")
+                job.features_downloaded = current
+                logger.info(f"Set features_downloaded to {current}")
+                # Only commit every 1000 features to reduce database load
+                if current % 1000 == 0 or current == total:
+                    logger.info(f"Committing progress update at {current}/{total}")
+                    db.commit()
+                    logger.info(f"Successfully committed progress")
+
             # Run async code in event loop
             result = asyncio.run(download_service.download_and_cache(
                 dataset_id=dataset.id,
                 geometry=job.params.get("geometry"),
                 format=job.params.get("format", "geojson"),
                 job_id=UUID(job_id),
+                progress_callback=update_progress,
             ))
 
             # Mark job as completed
@@ -145,12 +161,28 @@ def download_paged(job_id: str):
             job.current_stage = "downloading"
             db.commit()
 
+            # Create progress callback that updates database
+            def update_progress(current: int, total: int):
+                """Update job progress in database."""
+                logger.info(f"Progress callback invoked: {current}/{total} features")
+                if not job.total_features:
+                    job.total_features = total
+                    logger.info(f"Set total_features to {total}")
+                job.features_downloaded = current
+                logger.info(f"Set features_downloaded to {current}")
+                # Only commit every 1000 features to reduce database load
+                if current % 1000 == 0 or current == total:
+                    logger.info(f"Committing progress update at {current}/{total}")
+                    db.commit()
+                    logger.info(f"Successfully committed progress")
+
             # Run async code in event loop
             result = asyncio.run(download_service.download_and_cache(
                 dataset_id=dataset.id,
                 geometry=job.params.get("geometry"),
                 format=job.params.get("format", "geojson"),
                 job_id=UUID(job_id),
+                progress_callback=update_progress,
             ))
 
             # Mark job as completed

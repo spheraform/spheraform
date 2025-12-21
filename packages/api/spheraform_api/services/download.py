@@ -78,6 +78,7 @@ class DownloadService:
         geometry: Optional[dict] = None,
         format: str = "geojson",
         job_id: Optional[UUID] = None,
+        progress_callback: Optional[callable] = None,
     ) -> dict:
         """
         Download dataset and cache it in PostGIS.
@@ -136,6 +137,7 @@ class DownloadService:
                             max_records=max_records,
                             geometry=geometry,
                             format=format,
+                            progress_callback=progress_callback,
                         )
                     elif dataset.download_strategy == DownloadStrategy.PAGED:
                         logger.info(f"Using paged download for {dataset.name}")
@@ -145,6 +147,7 @@ class DownloadService:
                             max_records=max_records,
                             geometry=geometry,
                             format=format,
+                            progress_callback=progress_callback,
                         )
                     else:
                         # Default to paged for compatibility
@@ -155,6 +158,7 @@ class DownloadService:
                             max_records=max_records,
                             geometry=geometry,
                             format=format,
+                            progress_callback=progress_callback,
                         )
 
                     if not result.success:

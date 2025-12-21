@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import AsyncIterator, Optional, Dict
+from typing import AsyncIterator, Optional, Dict, Callable
 import uuid
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -88,9 +88,21 @@ class ArcGISAdapter(BaseGeoserverAdapter):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.client.aclose()
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    @retry(
+        stop=stop_after_attempt(5),  # Increased from 3 to 5 attempts
+        wait=wait_exponential(min=1, max=10),
+        reraise=True
+    )
     async def _request(self, url: str, params: dict = None) -> dict:
-        """Make HTTP request with retry logic."""
+        """
+        Make HTTP request with retry logic.
+
+        Retries on transient errors like network timeouts, 5xx server errors.
+        Fails fast on 4xx client errors (except 429 rate limit).
+        """
+        import gzip
+        import json
+
         headers = self._build_auth_headers()
         params = params or {}
         params.setdefault("f", "pjson")  # Use pjson for better compatibility with ArcGIS REST
@@ -104,8 +116,6 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
             # Check if content is gzipped and manually decompress if needed
             # Gzip files start with magic number 0x1f8b
-            import gzip
-            import json
 
             if content[:2] == b'\x1f\x8b':
                 # Content is gzipped, decompress it
@@ -113,8 +123,35 @@ class ArcGISAdapter(BaseGeoserverAdapter):
 
             # Decode and parse JSON
             return json.loads(content.decode('utf-8'))
-        except Exception as e:
+        except httpx.HTTPStatusError as e:
+            # Don't retry on 4xx client errors (except 429 Too Many Requests)
+            if 400 <= e.response.status_code < 500 and e.response.status_code != 429:
+                error_msg = f"HTTP {e.response.status_code}: {e.response.text[:200] if e.response.text else 'No response body'}"
+                logger.error(f"Client error for {url}: {error_msg}")
+                raise Exception(error_msg) from e
+            # Retry on 5xx server errors and 429
+            logger.warning(f"Retryable HTTP {e.response.status_code} for {url}, will retry")
             raise
+        except httpx.TimeoutException as e:
+            error_msg = f"Request timeout after {self.client.timeout}s"
+            logger.warning(f"Timeout for {url}, will retry: {error_msg}")
+            raise Exception(error_msg) from e
+        except httpx.NetworkError as e:
+            error_msg = f"Network error: {type(e).__name__} - {str(e) or 'Connection failed'}"
+            logger.warning(f"Network error for {url}, will retry: {error_msg}")
+            raise Exception(error_msg) from e
+        except httpx.RemoteProtocolError as e:
+            error_msg = f"Protocol error: {type(e).__name__} - {str(e) or 'Remote protocol error'}"
+            logger.warning(f"Protocol error for {url}, will retry: {error_msg}")
+            raise Exception(error_msg) from e
+        except json.JSONDecodeError as e:
+            error_msg = f"Invalid JSON response: {e.msg} at line {e.lineno}"
+            logger.error(f"JSON decode error for {url}: {error_msg}")
+            raise Exception(error_msg) from e
+        except Exception as e:
+            error_msg = f"{type(e).__name__}: {str(e) or 'Unknown error'}"
+            logger.error(f"Unexpected error in _request for {url}: {error_msg}")
+            raise Exception(error_msg) from e
 
     async def probe_capabilities(self) -> ServerCapabilities:
         """
@@ -469,17 +506,25 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 # TODO: Convert GeoJSON geometry to ArcGIS geometry format
                 pass
 
-            response = await self.client.get(layer_url, params=params)
-            response.raise_for_status()
+            # Use _request with retry logic instead of direct client call
+            geojson = await self._request(layer_url, params=params)
 
             # Write to file
-            with open(output_path, "wb") as f:
-                f.write(response.content)
+            import json
+            with open(output_path, "w") as f:
+                json.dump(geojson, f)
+
+            import os
+            size_bytes = os.path.getsize(output_path)
+
+            # Count features
+            feature_count = len(geojson.get("features", []))
 
             return DownloadResult(
                 success=True,
                 output_path=output_path,
-                size_bytes=len(response.content),
+                size_bytes=size_bytes,
+                feature_count=feature_count,
             )
 
         except Exception as e:
@@ -495,6 +540,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         max_records: Optional[int] = None,
         geometry: Optional[dict] = None,
         format: str = "geojson",
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> DownloadResult:
         """
         Download dataset using offset-based pagination.
@@ -507,6 +553,7 @@ class ArcGISAdapter(BaseGeoserverAdapter):
             max_records: Maximum records per request (from dataset metadata, or will query if not provided)
             geometry: Optional spatial filter
             format: Output format (geojson)
+            progress_callback: Optional callback(current, total) called periodically
         """
         try:
             query_url = f"{layer_url}/query"
@@ -529,58 +576,99 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 import json
                 with open(output_path, "w") as f:
                     json.dump({"type": "FeatureCollection", "features": []}, f)
-                return DownloadResult(success=True, output_path=output_path, size_bytes=0)
+                return DownloadResult(success=True, output_path=output_path, size_bytes=0, feature_count=0)
 
-            # Collect all features
-            all_features = []
-            offset = 0
-
-            while offset < total_count:
-                params = {
-                    "where": "1=1",
-                    "outFields": "*",
-                    "returnGeometry": "true",
-                    "outSR": "4326",
-                    "resultOffset": str(offset),
-                    "resultRecordCount": str(page_size),
-                    "f": "geojson",
-                }
-
-                # Add spatial filter if provided
-                if geometry:
-                    # TODO: Convert GeoJSON geometry to ArcGIS geometry format
-                    pass
-
-                response = await self.client.get(query_url, params=params)
-                response.raise_for_status()
-
-                geojson = response.json()
-                features = geojson.get("features", [])
-
-                if not features:
-                    break
-
-                all_features.extend(features)
-                offset += len(features)
-
-            # Write complete GeoJSON
+            # Stream write features to avoid memory issues with large datasets
             import json
-            result_geojson = {
-                "type": "FeatureCollection",
-                "features": all_features
-            }
+            offset = 0
+            feature_count = 0
+            consecutive_connection_errors = 0
 
+            # Open file and write GeoJSON header
             with open(output_path, "w") as f:
-                json.dump(result_geojson, f)
+                f.write('{"type": "FeatureCollection", "features": [')
+
+                first_batch = True
+
+                while offset < total_count:
+                    params = {
+                        "where": "1=1",
+                        "outFields": "*",
+                        "returnGeometry": "true",
+                        "outSR": "4326",
+                        "resultOffset": str(offset),
+                        "resultRecordCount": str(page_size),
+                        "f": "geojson",
+                    }
+
+                    # Add spatial filter if provided
+                    if geometry:
+                        # TODO: Convert GeoJSON geometry to ArcGIS geometry format
+                        pass
+
+                    # Use _request with retry logic, but catch connection errors to reduce page size
+                    logger.info(f"Fetching features {offset}-{offset+page_size} of {total_count}")
+
+                    try:
+                        geojson = await self._request(query_url, params=params)
+                        features = geojson.get("features", [])
+                        consecutive_connection_errors = 0  # Reset counter on success
+                    except Exception as e:
+                        error_msg = str(e)
+                        # Check if this is a connection/protocol error
+                        if "peer closed connection" in error_msg or "RemoteProtocolError" in error_msg:
+                            consecutive_connection_errors += 1
+
+                            # Reduce page size if we keep hitting connection errors
+                            if page_size > 100 and consecutive_connection_errors >= 2:
+                                old_page_size = page_size
+                                page_size = max(100, page_size // 2)
+                                logger.warning(
+                                    f"Connection errors detected, reducing page size from {old_page_size} to {page_size}"
+                                )
+                                # Retry this offset with smaller page size
+                                continue
+
+                        # Re-raise if not a connection error or we can't reduce further
+                        raise
+
+                    if not features:
+                        break
+
+                    # Write features to file immediately (streaming)
+                    for i, feature in enumerate(features):
+                        # Add comma between features (but not before first)
+                        if not first_batch or i > 0:
+                            f.write(',')
+                        else:
+                            first_batch = False
+
+                        json.dump(feature, f)
+                        feature_count += 1
+
+                    offset += len(features)
+
+                    # Call progress callback after each batch
+                    if progress_callback:
+                        progress_callback(feature_count, total_count)
+
+                    # Log progress every 10k features
+                    if feature_count % 10000 == 0:
+                        logger.info(f"Streamed {feature_count:,} / {total_count:,} features ({(feature_count/total_count)*100:.1f}%)")
+
+                # Write GeoJSON footer
+                f.write(']}')
 
             import os
             size_bytes = os.path.getsize(output_path)
+
+            logger.info(f"Completed streaming download: {feature_count:,} features, {size_bytes:,} bytes")
 
             return DownloadResult(
                 success=True,
                 output_path=output_path,
                 size_bytes=size_bytes,
-                feature_count=len(all_features),
+                feature_count=feature_count,
             )
 
         except Exception as e:
@@ -617,10 +705,8 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 "f": "geojson",
             }
 
-            response = await self.client.get(query_url, params=params)
-            response.raise_for_status()
-
-            return response.json()
+            # Use _request with retry logic
+            return await self._request(query_url, params=params)
 
         except Exception as e:
             logger.error(f"Error fetching preview from {layer_url}: {e}")
@@ -710,10 +796,8 @@ class ArcGISAdapter(BaseGeoserverAdapter):
                 "f": "geojson",
             }
 
-            response = await self.client.get(query_url, params=params)
-            response.raise_for_status()
-
-            geojson = response.json()
+            # Use _request with retry logic
+            geojson = await self._request(query_url, params=params)
             return geojson.get("features", [])
 
         except Exception as e:
