@@ -22,8 +22,8 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=3600,  # 1 hour hard limit
-    task_soft_time_limit=3300,  # 55 min soft limit
+    task_time_limit=14400,  # 4 hour hard limit (for very large datasets: 1M+ features)
+    task_soft_time_limit=13200,  # 3.5 hour soft limit
     worker_prefetch_multiplier=1,  # Reduced from 4: only 1 task per worker to prevent memory issues
     worker_max_tasks_per_child=50,  # Reduced from 1000: restart after 50 tasks to prevent memory leaks
     task_acks_late=True,  # Ack after completion (for retry on crash)
