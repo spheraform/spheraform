@@ -4,8 +4,10 @@ import logging
 from uuid import UUID
 
 from celery import group, chord
+
 from ..celery_app import celery_app
 from ..celery_utils import get_db_session
+from ..services.download import DownloadService
 from spheraform_core.models import Dataset
 
 logger = logging.getLogger("gunicorn.error")
@@ -44,7 +46,6 @@ async def fetch_dataset_for_export(dataset_id: str, bbox: tuple = None):
     Returns:
         GeoJSON features list
     """
-    from ..services.download import DownloadService
 
     with get_db_session() as db:
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()

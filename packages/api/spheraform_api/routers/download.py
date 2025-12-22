@@ -1,16 +1,21 @@
 """Download and export endpoints."""
 
+import json
 import logging
 import os
 import tempfile
 from datetime import datetime
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from ..celery_app import celery_app
 from ..dependencies import get_db
 from ..schemas import DownloadRequest, DownloadResponse, JobStatusResponse, DownloadJobProgressResponse
+from ..services.download import DownloadService
+from ..tasks.download import process_download_job
 from spheraform_core.models import Dataset, DownloadJob, JobStatus, Geoserver, ProviderType, DownloadStrategy
 from spheraform_core.adapters import ArcGISAdapter
 from spheraform_core.config import settings
@@ -28,7 +33,6 @@ async def download_datasets(request: DownloadRequest, db: Session = Depends(get_
     For small datasets, fetches synchronously and caches.
     For large datasets, queues a job and returns job_id.
     """
-    from ..services.download import DownloadService
 
     # Validate that all datasets exist
     datasets = (
@@ -86,7 +90,6 @@ async def download_datasets(request: DownloadRequest, db: Session = Depends(get_
 
     # Use Celery distributed workers if enabled
     if settings.use_celery:
-        from ..tasks.download import process_download_job
 
         logger.info(f"Dispatching download job {job.id} to Celery worker")
 
@@ -176,7 +179,6 @@ async def get_latest_download_job(dataset_id: UUID, db: Session = Depends(get_db
     # If using Celery and job has a task ID, check Celery state
     if settings.use_celery and job.celery_task_id:
         try:
-            from ..celery_app import celery_app
             task = celery_app.AsyncResult(job.celery_task_id)
             celery_state = task.state
 
@@ -238,7 +240,6 @@ async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
     celery_state = None
     if settings.use_celery and job.celery_task_id:
         try:
-            from ..celery_app import celery_app
             task = celery_app.AsyncResult(job.celery_task_id)
             celery_state = task.state
 
@@ -308,7 +309,6 @@ async def cancel_download_job(job_id: UUID, db: Session = Depends(get_db)):
     # If using Celery, revoke the task
     if settings.use_celery and job.celery_task_id:
         try:
-            from ..celery_app import celery_app
             celery_app.control.revoke(job.celery_task_id, terminate=True)
             logger.info(f"Revoked Celery task {job.celery_task_id} for job {job_id}")
         except Exception as e:
@@ -386,7 +386,6 @@ async def download_dataset_file(
         dataset_id: UUID of the dataset
         force_refresh: If True, re-fetch from source even if cached (default: False)
     """
-    from ..services.download import DownloadService
 
     # Get dataset
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
@@ -428,8 +427,6 @@ async def download_dataset_file(
         )
 
     try:
-        import json
-
         # Create temp file
         temp_fd, temp_path = tempfile.mkstemp(suffix=".geojson", prefix=f"dataset_{dataset_id}_")
         os.close(temp_fd)

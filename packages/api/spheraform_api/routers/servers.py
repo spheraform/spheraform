@@ -3,12 +3,15 @@ import logging
 from typing import List
 from uuid import UUID
 from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from ..celery_app import celery_app
 from ..dependencies import get_db
 from ..schemas import ServerCreate, ServerUpdate, ServerResponse, CrawlJobResponse
+from ..tasks.crawl import process_crawl_job
 from spheraform_core.models import Geoserver, HealthStatus, Dataset, ProviderType, CrawlJob, JobStatus
 from spheraform_core.adapters import ArcGISAdapter
 from spheraform_core.config import settings
@@ -150,8 +153,6 @@ async def trigger_crawl(server_id: UUID, db: Session = Depends(get_db)):
 
     # Use Celery distributed workers if enabled
     if settings.use_celery:
-        from ..tasks.crawl import process_crawl_job
-
         logger.info(f"Dispatching crawl job {job.id} to Celery worker")
 
         # Submit to Celery queue
@@ -196,7 +197,6 @@ async def get_latest_crawl_job(server_id: UUID, db: Session = Depends(get_db)):
     # If using Celery and job has a task ID, check Celery state
     if settings.use_celery and job.celery_task_id:
         try:
-            from ..celery_app import celery_app
             task = celery_app.AsyncResult(job.celery_task_id)
             celery_state = task.state
 
@@ -243,7 +243,6 @@ async def get_crawl_status(job_id: UUID, db: Session = Depends(get_db)):
     celery_state = None
     if settings.use_celery and job.celery_task_id:
         try:
-            from ..celery_app import celery_app
             task = celery_app.AsyncResult(job.celery_task_id)
             celery_state = task.state
 
@@ -302,7 +301,6 @@ async def cancel_crawl_job(job_id: UUID, db: Session = Depends(get_db)):
     # If using Celery, revoke the task
     if settings.use_celery and job.celery_task_id:
         try:
-            from ..celery_app import celery_app
             celery_app.control.revoke(job.celery_task_id, terminate=True)
             logger.info(f"Revoked Celery task {job.celery_task_id} for crawl job {job_id}")
         except Exception as e:

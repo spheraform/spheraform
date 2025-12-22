@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime
 from typing import Optional
@@ -210,7 +211,6 @@ def start_worker_thread(database_url: str):
     Args:
         database_url: Database connection URL
     """
-    import threading
 
     worker = DownloadWorker(database_url)
     thread = threading.Thread(target=worker.start, daemon=True)

@@ -1,12 +1,15 @@
 """Download task definitions for Celery distributed processing."""
 
+import asyncio
 import logging
 from datetime import datetime
 from uuid import UUID
 
 from celery import group, chord
+
 from ..celery_app import celery_app
 from ..celery_utils import get_db_session
+from ..services.download import DownloadService
 from spheraform_core.models import DownloadJob, Dataset, JobStatus, DownloadStrategy
 from spheraform_core.adapters import ArcGISAdapter
 
@@ -69,9 +72,6 @@ def download_simple(job_id: str):
     Returns:
         Download result dict
     """
-    import asyncio
-    from ..services.download import DownloadService
-
     with get_db_session() as db:
         job = db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
         if not job:
@@ -144,9 +144,6 @@ def download_paged(job_id: str):
     Returns:
         Download result dict
     """
-    import asyncio
-    from ..services.download import DownloadService
-
     with get_db_session() as db:
         job = db.query(DownloadJob).filter(DownloadJob.id == job_id).first()
         if not job:

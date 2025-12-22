@@ -1,10 +1,14 @@
 """Crawl task definitions for Celery distributed processing."""
 
+import asyncio
+import json
 import logging
 from datetime import datetime
 from uuid import UUID
 
 from celery import group
+from sqlalchemy import func
+
 from ..celery_app import celery_app
 from ..celery_utils import get_db_session
 from spheraform_core.models import CrawlJob, Geoserver, Dataset, JobStatus, HealthStatus
@@ -78,7 +82,6 @@ def process_crawl_job(self, crawl_job_id: str):
 @celery_app.task(name="crawl.discover_services")
 def discover_services(base_url: str, server_id: str) -> list[str]:
     """Run async discovery in sync Celery task."""
-    import asyncio
     return asyncio.run(_discover_services_async(base_url, server_id))
 
 
@@ -129,7 +132,6 @@ async def _discover_services_async(base_url: str, server_id: str) -> list[str]:
 @celery_app.task(name="crawl.process_service", bind=True, max_retries=3)
 def process_service(self, crawl_job_id: str, service_url: str):
     """Run async service processing in sync Celery task."""
-    import asyncio
     return asyncio.run(_process_service_async(self, crawl_job_id, service_url))
 
 
@@ -170,7 +172,6 @@ async def _process_service_async(self, crawl_job_id: str, service_url: str):
                 # Discover layers in this service
                 async for dataset_meta in adapter.discover_datasets():
                     # Upsert dataset to database
-                    from sqlalchemy import func
 
                     # Check if dataset exists
                     existing = (
@@ -208,13 +209,11 @@ async def _process_service_async(self, crawl_job_id: str, service_url: str):
                         existing.themes = dataset_meta.themes
 
                         if dataset_meta.source_metadata:
-                            import json
                             existing.source_metadata = json.dumps(dataset_meta.source_metadata) if isinstance(dataset_meta.source_metadata, dict) else dataset_meta.source_metadata
                     else:
                         # Create new dataset
                         source_metadata_str = None
                         if dataset_meta.source_metadata:
-                            import json
                             source_metadata_str = json.dumps(dataset_meta.source_metadata) if isinstance(dataset_meta.source_metadata, dict) else dataset_meta.source_metadata
 
                         new_dataset = Dataset(
