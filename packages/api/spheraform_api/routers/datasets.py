@@ -10,6 +10,7 @@ from ..dependencies import get_db
 from ..schemas import DatasetResponse
 from spheraform_core.models import Dataset, Geoserver, ProviderType
 from spheraform_core.adapters import ArcGISAdapter
+from spheraform_core.storage.s3_client import S3Client
 
 router = APIRouter()
 
@@ -201,7 +202,6 @@ async def get_tiles_url(
             detail=f"Dataset {dataset_id} has no PMTiles available. PMTiles are generated during download for datasets in object storage."
         )
 
-    from spheraform_core.storage.s3_client import S3Client
     s3_client = S3Client()
 
     if presigned:

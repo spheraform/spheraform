@@ -15,6 +15,7 @@ from sqlalchemy import text
 from spheraform_core.models import Dataset, Geoserver, DownloadStrategy, DownloadJob, JobStatus
 from spheraform_core.adapters import ArcGISAdapter
 from spheraform_core.storage.backend import PostGISStorageBackend, S3StorageBackend
+from spheraform_core.storage.pmtiles_gen import generate_from_geojson
 
 logger = logging.getLogger("gunicorn.error")
 
@@ -208,14 +209,12 @@ class DownloadService:
                         # Generate PMTiles for ALL datasets in object storage
                         logger.info(f"Generating PMTiles for {dataset.name}")
 
-                        import tempfile
                         with tempfile.TemporaryDirectory() as pmtiles_temp_dir:
                             pmtiles_path = Path(pmtiles_temp_dir) / "tiles.pmtiles"
 
                             # Adaptive zoom levels based on feature count
                             max_zoom = 14 if result.feature_count < 100000 else 12
 
-                            from spheraform_core.storage.pmtiles_gen import generate_from_geojson
                             pmtiles_metadata = generate_from_geojson(
                                 geojson_path=temp_path,
                                 pmtiles_path=pmtiles_path,
