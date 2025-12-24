@@ -247,8 +247,9 @@ class PostGISStorageBackend(StorageBackend):
             batch = features[i : i + batch_size]
 
             for feature in batch:
-                geometry_json = json.dumps(feature.get("geometry"))
-                properties_json = json.dumps(feature.get("properties", {}))
+                # Convert Decimal to float for JSON serialization
+                geometry_json = json.dumps(feature.get("geometry"), default=float)
+                properties_json = json.dumps(feature.get("properties", {}), default=float)
 
                 # Transform from 4326 (WGS84) to 3857 (Web Mercator) for Martin
                 insert_sql = f"""
@@ -401,8 +402,9 @@ class PostGISStorageBackend(StorageBackend):
     def _insert_batch(self, cache_table: str, batch: list):
         """Insert a batch of features into PostGIS table."""
         for feature in batch:
-            geometry_json = json.dumps(feature.get("geometry"))
-            properties_json = json.dumps(feature.get("properties", {}))
+            # Convert Decimal to float for JSON serialization
+            geometry_json = json.dumps(feature.get("geometry"), default=float)
+            properties_json = json.dumps(feature.get("properties", {}), default=float)
 
             # Transform from 4326 (WGS84) to 3857 (Web Mercator) for Martin
             insert_sql = f"""

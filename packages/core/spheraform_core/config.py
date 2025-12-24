@@ -30,7 +30,11 @@ class Settings(BaseSettings):
     # Object Storage (MinIO/S3)
     s3_endpoint: str = Field(
         default="http://localhost:9000",
-        description="S3-compatible storage endpoint",
+        description="S3-compatible storage endpoint (internal/API access)",
+    )
+    s3_public_endpoint: Optional[str] = Field(
+        default=None,
+        description="Public S3 endpoint for browser access (e.g., http://localhost:9000). Falls back to s3_endpoint if not set.",
     )
     s3_access_key: str = Field(default="minioadmin", description="S3 access key")
     s3_secret_key: str = Field(default="minioadmin", description="S3 secret key")

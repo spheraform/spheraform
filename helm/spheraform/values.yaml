@@ -40,11 +40,11 @@ postgres:
     periodSeconds: 5
   backup:
     enabled: true
-    schedule: "0 * * * *"  # Every hour at minute 0
+    schedule: "0 2 * * *"  # Daily at 2 AM
     retention:
-      hourlyBackupHours: 72      # Keep hourly for 72 hours
-      dailyBackupDays: 30        # Keep daily for 30 days
-      dailyBackupHour: 0         # Hour to keep as daily backup (0-23)
+      hourlyBackupHours: 0       # No hourly backups
+      dailyBackupDays: 7         # Keep daily for 7 days
+      dailyBackupHour: 2         # Hour to keep as daily backup (0-23)
     storage:
       local:
         enabled: true
@@ -120,6 +120,10 @@ minio:
   rootUser: minioadmin
   rootPassword: minioadmin  # CHANGE THIS IN PRODUCTION!
   bucket: spheraform
+  # Public endpoint for browser access (e.g., PMTiles in frontend)
+  # For local dev: http://localhost:9000 (port-forwarded)
+  # For production: https://minio.yourdomain.com or your actual public URL
+  publicEndpoint: "http://localhost:9000"
   setup:
     enabled: true
     image:

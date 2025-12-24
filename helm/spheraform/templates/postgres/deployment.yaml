@@ -39,7 +39,7 @@ spec:
             command:
             - sh
             - -c
-            - pg_isready -U {{ .Values.postgres.username }}
+            - pg_isready -h localhost -U {{ .Values.postgres.username }}
           initialDelaySeconds: {{ .Values.postgres.livenessProbe.initialDelaySeconds }}
           periodSeconds: {{ .Values.postgres.livenessProbe.periodSeconds }}
           failureThreshold: {{ .Values.postgres.livenessProbe.failureThreshold }}
@@ -50,7 +50,7 @@ spec:
             command:
             - sh
             - -c
-            - pg_isready -U {{ .Values.postgres.username }}
+            - pg_isready -h localhost -U {{ .Values.postgres.username }}
           initialDelaySeconds: {{ .Values.postgres.readinessProbe.initialDelaySeconds }}
           periodSeconds: {{ .Values.postgres.readinessProbe.periodSeconds }}
         {{- end }}
