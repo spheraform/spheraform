@@ -15,6 +15,7 @@ data:
   S3_SECRET_KEY: {{ .Values.minio.rootPassword | quote }}
   S3_BUCKET: {{ .Values.minio.bucket | quote }}
   MARTIN_URL: "http://{{ include "spheraform.fullname" . }}-martin:3000"
+  USE_CELERY: "true"
   {{- range $key, $value := .Values.api.env }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}

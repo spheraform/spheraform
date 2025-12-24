@@ -114,6 +114,7 @@ services:
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       S3_BUCKET: spheraform
+      USE_CELERY: "true"
       PROXYSCRAPE_ENABLED: "false"
     ports:
       - "8000:8000"
