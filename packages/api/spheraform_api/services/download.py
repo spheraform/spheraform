@@ -208,7 +208,15 @@ class DownloadService:
                             pmtiles_path = Path(pmtiles_temp_dir) / "tiles.pmtiles"
 
                             # Adaptive zoom levels based on feature count
-                            max_zoom = 14 if result.feature_count < 100000 else 12
+                            # For small datasets, use higher zoom to ensure visibility
+                            if result.feature_count < 1000:
+                                max_zoom = 16
+                            elif result.feature_count < 10000:
+                                max_zoom = 15
+                            elif result.feature_count < 100000:
+                                max_zoom = 14
+                            else:
+                                max_zoom = 12
 
                             pmtiles_metadata = generate_from_geojson(
                                 geojson_path=temp_path,

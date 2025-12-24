@@ -93,6 +93,7 @@ def generate_from_geojson(
         "--simplification", str(simplification),
         "--buffer", str(buffer),
         "--projection", "EPSG:3857",  # Web Mercator for tiles
+        "--no-feature-limit",  # Generate all zoom levels even for small/clustered datasets
         "--drop-densest-as-needed",  # Auto simplify if too many features
         "--extend-zooms-if-still-dropping",  # Preserve features
         str(geojson_path),

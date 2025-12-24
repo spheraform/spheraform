@@ -53,6 +53,15 @@ function createMapStore() {
 				const sourceId = `dataset-${datasetId}`;
 				const layerId = `layer-${datasetId}`;
 
+				console.log('[MapStore] Adding layer:', {
+					datasetId,
+					datasetName,
+					pmtilesUrl,
+					geometryType,
+					sourceId,
+					layerId
+				});
+
 				// Generate a random color for this dataset
 				const color = generateRandomColor();
 
@@ -68,15 +77,46 @@ function createMapStore() {
 				}
 
 				// Add PMTiles vector source
-				map.addSource(sourceId, {
-					type: 'vector',
-					url: `pmtiles://${pmtilesUrl}`,
-					minzoom: 0,
-					maxzoom: 14
+				const pmtilesSourceUrl = `pmtiles://${pmtilesUrl}`;
+				console.log('[MapStore] Adding source:', sourceId, 'with URL:', pmtilesSourceUrl);
+
+				try {
+					// Fetch PMTiles metadata to get bounds
+					const protocol = new Protocol();
+
+					map.addSource(sourceId, {
+						type: 'vector',
+						url: pmtilesSourceUrl,
+						minzoom: 0,
+						maxzoom: 22,
+						// Let MapLibre fetch tiles globally if bounds not specified
+						// The PMTiles file contains its own bounds
+					});
+
+					console.log('[MapStore] Source added successfully');
+				} catch (error) {
+					console.error('[MapStore] Error adding source:', error);
+					throw error;
+				}
+
+				// Listen for source data events to debug tile loading
+				map.once('sourcedata', (e) => {
+					if (e.sourceId === sourceId) {
+						console.log('[MapStore] Source data loaded:', e);
+						const source = map.getSource(sourceId);
+						console.log('[MapStore] Source object:', source);
+					}
+				});
+
+				map.once('sourcedataerror', (e) => {
+					if (e.source?.id === sourceId) {
+						console.error('[MapStore] Source data error:', e);
+					}
 				});
 
 				// Source layer name is the dataset ID (set during PMTiles generation)
 				const sourceLayer = datasetId;
+				console.log('[MapStore] Using source layer:', sourceLayer);
 
 				// Normalize geometry type (handle variations like "Point", "esriGeometryPoint", etc.)
 				const normalizedType = geometryType?.toLowerCase() || '';
@@ -86,6 +126,7 @@ function createMapStore() {
 
 				// For Point geometries, add circle layer
 				if (isPoint || !geometryType) {
+					console.log('[MapStore] Adding circle layer:', layerId);
 					map.addLayer({
 						id: layerId,
 						type: 'circle',
@@ -109,6 +150,7 @@ function createMapStore() {
 							'circle-stroke-width': 1
 						}
 					});
+					console.log('[MapStore] Circle layer added');
 				}
 
 				// For LineString geometries, add line layer
@@ -129,6 +171,7 @@ function createMapStore() {
 
 				// For Polygon geometries, add fill + outline layers
 				if (isPolygon || !geometryType) {
+					console.log('[MapStore] Adding polygon fill layer:', `${layerId}-fill`);
 					map.addLayer({
 						id: `${layerId}-fill`,
 						type: 'fill',
@@ -141,7 +184,9 @@ function createMapStore() {
 							'fill-opacity': 0.3
 						}
 					});
+					console.log('[MapStore] Polygon fill layer added');
 
+					console.log('[MapStore] Adding polygon outline layer:', `${layerId}-outline`);
 					map.addLayer({
 						id: `${layerId}-outline`,
 						type: 'line',
@@ -154,6 +199,7 @@ function createMapStore() {
 							'line-width': 2
 						}
 					});
+					console.log('[MapStore] Polygon outline layer added');
 				}
 
 				// Add to active datasets if not already there

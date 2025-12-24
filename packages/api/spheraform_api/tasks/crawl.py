@@ -48,8 +48,9 @@ def process_crawl_job(self, crawl_job_id: str):
 
         try:
             # Discover all services (lightweight - just URLs)
-            services_task = discover_services.delay(server.base_url, str(server.id))
-            services = services_task.get()  # Wait for discovery to complete
+            # Run discovery directly (not as a subtask) to avoid Celery deadlock
+            import asyncio
+            services = asyncio.run(_discover_services_async(server.base_url, str(server.id)))
 
             job.total_services = len(services)
             job.current_stage = "processing_services"
@@ -183,15 +184,13 @@ async def _process_service_async(self, crawl_job_id: str, service_url: str):
                         .first()
                     )
 
-                    # Convert bbox tuple to WKT POLYGON and transform to EPSG:4326
+                    # Convert bbox tuple to WKT POLYGON (already in EPSG:4326 from adapter)
                     bbox_geometry = None
-                    if dataset_meta.bbox and dataset_meta.source_srid:
+                    if dataset_meta.bbox:
                         minx, miny, maxx, maxy = dataset_meta.bbox
                         bbox_wkt = f"POLYGON(({minx} {miny},{maxx} {miny},{maxx} {maxy},{minx} {maxy},{minx} {miny}))"
-                        bbox_geometry = func.ST_Transform(
-                            func.ST_GeomFromText(bbox_wkt, dataset_meta.source_srid),
-                            4326,
-                        )
+                        # Bbox is already in WGS84 (transformed by adapter), so create geometry directly in EPSG:4326
+                        bbox_geometry = func.ST_GeomFromText(bbox_wkt, 4326)
 
                     if existing:
                         # Update existing dataset

@@ -160,8 +160,9 @@ class S3Client:
 
             async with response["Body"] as stream:
                 with open(local_path, "wb") as f:
-                    while chunk := await stream.read(8192):
-                        f.write(chunk)
+                    # Read entire stream (aioboto3 read() doesn't accept size argument)
+                    content = await stream.read()
+                    f.write(content)
 
             logger.info(f"Download complete: {local_path}")
 
