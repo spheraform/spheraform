@@ -59,10 +59,6 @@ portForward:
     port: 8000
     localPort: 8000
   - resourceType: service
-    resourceName: spheraform-martin
-    port: 3000
-    localPort: 3000
-  - resourceType: service
     resourceName: spheraform-minio
     port: 9001
     localPort: 9001

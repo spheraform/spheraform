@@ -16,9 +16,10 @@ RUN apt-get update -qq && apt-get install -y \
     libproj-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Build and install tippecanoe from source
+# Build and install tippecanoe v2.79.0 from source (downgraded from 2.80.0 due to bounds bug)
 RUN git clone https://github.com/felt/tippecanoe.git /tmp/tippecanoe && \
     cd /tmp/tippecanoe && \
+    git checkout 2.79.0 && \
     make -j$(nproc) && \
     make install && \
     rm -rf /tmp/tippecanoe
