@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Default zoom levels for PMTiles
 DEFAULT_MIN_ZOOM = 0
-DEFAULT_MAX_ZOOM = 14
+DEFAULT_MAX_ZOOM = 22  # High zoom for detailed geometry preservation
 
 
 class PMTilesGenerationError(Exception):
@@ -82,7 +82,7 @@ def generate_from_geojson(
     pmtiles_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Build tippecanoe command
-    # Using EPSG:3857 (Web Mercator) for web mapping
+    # PMTiles v3 uses WGS84 (EPSG:4326) for metadata and bounds
     cmd = [
         "tippecanoe",
         "--output", str(pmtiles_path),
@@ -92,7 +92,7 @@ def generate_from_geojson(
         "--layer", layer_name,
         "--simplification", str(simplification),
         "--buffer", str(buffer),
-        "--projection", "EPSG:3857",  # Web Mercator for tiles
+        "--projection=EPSG:4326",  # Input data is in WGS84, output bounds in WGS84
         "--no-feature-limit",  # Generate all zoom levels even for small/clustered datasets
         "--drop-densest-as-needed",  # Auto simplify if too many features
         "--extend-zooms-if-still-dropping",  # Preserve features

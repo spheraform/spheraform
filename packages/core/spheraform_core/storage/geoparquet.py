@@ -150,6 +150,9 @@ def _write_parquet_streaming(
 
             # Create writer on first batch
             if writer is None:
+                # Add GeoParquet metadata to schema for first batch
+                table = _add_geoparquet_metadata(table)
+
                 writer = pq.ParquetWriter(
                     parquet_path,
                     table.schema,
@@ -175,6 +178,9 @@ def _write_parquet_inmemory(
     """Write GeoParquet in-memory (all features at once)."""
     records = list(src)
     table = _records_to_arrow_table(records, schema, project)
+
+    # Add GeoParquet metadata to schema
+    table = _add_geoparquet_metadata(table)
 
     pq.write_table(
         table,
@@ -246,6 +252,164 @@ def _records_to_arrow_table(
     return pa.Table.from_arrays(arrays, schema=schema)
 
 
+def _add_geoparquet_metadata(table: pa.Table) -> pa.Table:
+    """
+    Add GeoParquet metadata to table schema.
+
+    Adds the required 'geo' metadata field to make the Parquet file
+    compliant with the GeoParquet v1.0.0 specification.
+
+    Args:
+        table: Arrow table with geometry column
+
+    Returns:
+        Table with GeoParquet metadata in schema
+    """
+    from shapely import wkb
+
+    # Calculate bbox and detect geometry types from all geometries
+    min_x, min_y, max_x, max_y = float('inf'), float('inf'), float('-inf'), float('-inf')
+    geometry_types = set()
+
+    for i in range(len(table)):
+        geom_wkb_bytes = table["geometry"][i].as_py()
+        if geom_wkb_bytes:
+            geom = wkb.loads(geom_wkb_bytes)
+            geometry_types.add(geom.geom_type)
+
+            # Update bbox
+            bounds = geom.bounds
+            min_x = min(min_x, bounds[0])
+            min_y = min(min_y, bounds[1])
+            max_x = max(max_x, bounds[2])
+            max_y = max(max_y, bounds[3])
+
+    # Build GeoParquet metadata per v1.0.0 spec
+    # Use PROJJSON format for CRS (compatible with pyproj/GeoPandas)
+    geo_metadata = {
+        "version": "1.0.0",
+        "primary_column": "geometry",
+        "columns": {
+            "geometry": {
+                "encoding": "WKB",
+                "geometry_types": sorted(list(geometry_types)),
+                "crs": {
+                    "$schema": "https://proj.org/schemas/v0.4/projjson.schema.json",
+                    "type": "GeographicCRS",
+                    "name": "WGS 84",
+                    "datum_ensemble": {
+                        "name": "World Geodetic System 1984 ensemble",
+                        "members": [
+                            {
+                                "name": "World Geodetic System 1984 (Transit)",
+                                "id": {
+                                    "authority": "EPSG",
+                                    "code": 1166
+                                }
+                            },
+                            {
+                                "name": "World Geodetic System 1984 (G730)",
+                                "id": {
+                                    "authority": "EPSG",
+                                    "code": 1152
+                                }
+                            },
+                            {
+                                "name": "World Geodetic System 1984 (G873)",
+                                "id": {
+                                    "authority": "EPSG",
+                                    "code": 1153
+                                }
+                            },
+                            {
+                                "name": "World Geodetic System 1984 (G1150)",
+                                "id": {
+                                    "authority": "EPSG",
+                                    "code": 1154
+                                }
+                            },
+                            {
+                                "name": "World Geodetic System 1984 (G1674)",
+                                "id": {
+                                    "authority": "EPSG",
+                                    "code": 1155
+                                }
+                            },
+                            {
+                                "name": "World Geodetic System 1984 (G1762)",
+                                "id": {
+                                    "authority": "EPSG",
+                                    "code": 1156
+                                }
+                            },
+                            {
+                                "name": "World Geodetic System 1984 (G2139)",
+                                "id": {
+                                    "authority": "EPSG",
+                                    "code": 1309
+                                }
+                            }
+                        ],
+                        "ellipsoid": {
+                            "name": "WGS 84",
+                            "semi_major_axis": 6378137,
+                            "inverse_flattening": 298.257223563
+                        },
+                        "accuracy": "2.0",
+                        "id": {
+                            "authority": "EPSG",
+                            "code": 6326
+                        }
+                    },
+                    "coordinate_system": {
+                        "subtype": "ellipsoidal",
+                        "axis": [
+                            {
+                                "name": "Geodetic latitude",
+                                "abbreviation": "Lat",
+                                "direction": "north",
+                                "unit": "degree"
+                            },
+                            {
+                                "name": "Geodetic longitude",
+                                "abbreviation": "Lon",
+                                "direction": "east",
+                                "unit": "degree"
+                            }
+                        ]
+                    },
+                    "scope": "Horizontal component of 3D system.",
+                    "area": "World.",
+                    "bbox": {
+                        "south_latitude": -90,
+                        "west_longitude": -180,
+                        "north_latitude": 90,
+                        "east_longitude": 180
+                    },
+                    "id": {
+                        "authority": "EPSG",
+                        "code": 4326
+                    }
+                },
+                "bbox": [min_x, min_y, max_x, max_y]
+            }
+        }
+    }
+
+    # Add metadata to schema
+    existing_metadata = table.schema.metadata or {}
+    new_metadata = {
+        **existing_metadata,
+        b'geo': json.dumps(geo_metadata).encode('utf-8')
+    }
+
+    # Create new schema with metadata
+    new_schema = table.schema.with_metadata(new_metadata)
+
+    # Return table with updated schema
+    return table.cast(new_schema)
+
+
 def geoparquet_to_geojson(
     parquet_path: str | Path,
     geojson_path: str | Path,
@@ -288,10 +452,61 @@ def geoparquet_to_geojson(
     # Convert to GeoJSON
     features = []
 
+    # Check if we need to reproject (GeoJSON should always be in EPSG:4326)
+    needs_reprojection = False
+    source_crs = None
+
+    # Try to get CRS from GeoParquet metadata
+    if hasattr(table.schema, 'metadata') and table.schema.metadata:
+        geo_metadata = table.schema.metadata.get(b'geo')
+        if geo_metadata:
+            import json as json_module
+            geo_dict = json_module.loads(geo_metadata)
+            crs = geo_dict.get('columns', {}).get('geometry', {}).get('crs')
+            if crs:
+                # Parse CRS - can be string or dict
+                if isinstance(crs, dict):
+                    # Extract EPSG code from dict format
+                    crs_id = crs.get('id', {})
+                    if crs_id.get('authority') == 'EPSG':
+                        epsg_code = crs_id.get('code')
+                        source_crs = f"EPSG:{epsg_code}"
+                    else:
+                        # Unsupported CRS format
+                        source_crs = 'EPSG:4326'
+                        logger.warning(f"Unsupported CRS format: {crs}, assuming EPSG:4326")
+                else:
+                    source_crs = str(crs)
+
+                # Check if we need reprojection
+                if source_crs.upper() != 'EPSG:4326':
+                    needs_reprojection = True
+                    logger.info(f"Reprojecting from {source_crs} to EPSG:4326 for GeoJSON export")
+                else:
+                    source_crs = 'EPSG:4326'
+
+    # If no metadata, assume EPSG:4326 (WGS84) - this is what we store by default
+    if not source_crs:
+        # Default assumption: data is stored in EPSG:4326 (no transformation needed)
+        needs_reprojection = False
+        source_crs = 'EPSG:4326'
+        logger.info("No CRS metadata found, assuming data is in EPSG:4326 (no transformation needed)")
+
+    # Create transformer if needed
+    transformer = None
+    if needs_reprojection:
+        from pyproj import Transformer
+        transformer = Transformer.from_crs(source_crs, "EPSG:4326", always_xy=True)
+
     for i in range(num_features):
         # Parse WKB geometry
         geom_wkb = table["geometry"][i].as_py()
         geom = wkb.loads(geom_wkb)
+
+        # Reproject to EPSG:4326 if needed
+        if transformer:
+            from shapely.ops import transform as shapely_transform
+            geom = shapely_transform(transformer.transform, geom)
 
         # Build properties
         properties = {}
