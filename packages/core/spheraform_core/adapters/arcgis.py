@@ -212,6 +212,14 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         Walks through all folders and services to find FeatureServers.
         """
         try:
+            # Check if base_url is a service URL (FeatureServer/MapServer)
+            # If so, discover layers directly from this service
+            if any(svc_type in self.base_url for svc_type in ['/FeatureServer', '/MapServer']):
+                async for dataset in self.discover_layers():
+                    yield dataset
+                return
+
+            # Otherwise, treat as catalog and discover all services
             # Get root catalog
             catalog = await self._request(self.base_url)
 
@@ -237,6 +245,51 @@ class ArcGISAdapter(BaseGeoserverAdapter):
         except Exception as e:
             # Log error but don't fail completely
             logger.exception(f"Error discovering datasets: {e}")
+
+    async def discover_layers(self) -> AsyncIterator[DatasetMetadata]:
+        """
+        Discover layers directly from a FeatureServer or MapServer URL.
+
+        Use this when base_url points to a specific service, not a catalog.
+        """
+        try:
+            service_info = await self._request(self.base_url)
+
+            # Extract serviceItemId from service info
+            service_item_id = service_info.get("serviceItemId")
+
+            # Extract service name from URL
+            # e.g., "https://.../MyService/FeatureServer" -> "MyService"
+            url_parts = self.base_url.rstrip('/').split('/')
+            service_name = url_parts[-2] if len(url_parts) >= 2 else "Unknown"
+
+            layers_count = len(service_info.get("layers", []))
+            logger.info(f"Discovering {layers_count} layers from service: {service_name}")
+
+            # Process each layer in the service
+            for layer in service_info.get("layers", []):
+                layer_id = layer.get("id")
+                layer_name = layer.get("name")
+
+                # Get detailed layer information
+                layer_url = f"{self.base_url}/{layer_id}"
+                layer_info = await self._request(layer_url)
+
+                # Get accurate feature count using returnCountOnly query
+                feature_count = await self._get_feature_count(layer_url)
+
+                # Extract metadata
+                metadata = self._extract_metadata(
+                    layer_info,
+                    layer_url,
+                    service_name,
+                    service_item_id=service_item_id,
+                    feature_count=feature_count
+                )
+                yield metadata
+
+        except Exception as e:
+            logger.exception(f"Error discovering layers from {self.base_url}: {e}")
 
     async def _process_service(self, service: dict) -> AsyncIterator[DatasetMetadata]:
         """Process a single ArcGIS service and yield its layers."""
