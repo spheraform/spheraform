@@ -1,4 +1,4 @@
-.PHONY: help migrate migrate-pod migrate-create migrate-down migrate-history db-shell api-shell tilt-up tilt-down db-dump-docker db-restore-k8s db-mirror martin-check backup-now-docker backup-now-k8s backup-list-docker backup-list-k8s backup-restore-docker backup-health-docker backup-health-k8s
+.PHONY: help migrate migrate-pod migrate-create migrate-down migrate-history db-shell api-shell tilt-up tilt-down db-dump-docker db-restore-k8s db-mirror martin-check backup-now-docker backup-now-k8s backup-list-docker backup-list-k8s backup-restore-docker backup-restore-latest-docker backup-restore-latest-k8s backup-health-docker backup-health-k8s
 
 # Default target
 help:
@@ -18,13 +18,15 @@ help:
 	@echo "  make db-shell             - Connect to PostgreSQL in pod"
 	@echo ""
 	@echo "Automated Backups:"
-	@echo "  make backup-now-docker    - Run manual backup (docker-compose)"
-	@echo "  make backup-now-k8s       - Run manual backup (Kubernetes)"
-	@echo "  make backup-list-docker   - List available backups (docker-compose)"
-	@echo "  make backup-list-k8s      - List available backups (Kubernetes)"
-	@echo "  make backup-restore-docker FILE=<path> - Restore from backup (docker-compose)"
-	@echo "  make backup-health-docker - Check backup health (docker-compose)"
-	@echo "  make backup-health-k8s    - Check backup health (Kubernetes)"
+	@echo "  make backup-now-docker              - Run manual backup (docker-compose)"
+	@echo "  make backup-now-k8s                 - Run manual backup (Kubernetes)"
+	@echo "  make backup-list-docker             - List available backups (docker-compose)"
+	@echo "  make backup-list-k8s                - List available backups (Kubernetes)"
+	@echo "  make backup-restore-docker FILE=... - Restore from specific backup (docker-compose)"
+	@echo "  make backup-restore-latest-docker   - Restore from most recent backup (docker-compose)"
+	@echo "  make backup-restore-latest-k8s      - Restore from most recent backup (Kubernetes)"
+	@echo "  make backup-health-docker           - Check backup health (docker-compose)"
+	@echo "  make backup-health-k8s              - Check backup health (Kubernetes)"
 	@echo ""
 	@echo "Debugging:"
 	@echo "  make martin-check         - Check Martin tile server status"
@@ -182,6 +184,46 @@ backup-restore-docker:
 backup-health-docker:
 	@echo "Checking backup health (docker-compose)..."
 	@docker exec spheraform-postgres-backup /scripts/backup_health_check.sh
+
+# Restore from most recent backup in docker-compose
+backup-restore-latest-docker:
+	@echo "Finding most recent backup in MinIO..."
+	@LATEST=$$(docker exec spheraform-postgres-backup mc ls backup/spheraform/backups/postgres/ 2>/dev/null | grep '\.sql\.gz$$' | tail -1 | awk '{print $$NF}') && \
+	if [ -z "$$LATEST" ]; then \
+		echo "Error: No backups found in MinIO"; \
+		exit 1; \
+	fi && \
+	echo "Latest backup: $$LATEST" && \
+	echo "" && \
+	echo "This will restore from: backup/spheraform/backups/postgres/$$LATEST" && \
+	docker exec -i spheraform-postgres-backup /scripts/postgres_restore.sh "backup/spheraform/backups/postgres/$$LATEST"
+
+# Restore from most recent backup in Kubernetes
+backup-restore-latest-k8s:
+	@echo "Finding most recent backup in MinIO..."
+	@LATEST=$$(kubectl exec deployment/spheraform-minio -- mc ls local/spheraform/backups/postgres/ 2>/dev/null | grep '\.sql\.gz$$' | tail -1 | awk '{print $$NF}') && \
+	if [ -z "$$LATEST" ]; then \
+		echo "Error: No backups found in MinIO"; \
+		exit 1; \
+	fi && \
+	echo "Latest backup: $$LATEST" && \
+	echo "" && \
+	BACKUP_PATH="local/spheraform/backups/postgres/$$LATEST" && \
+	echo "This will restore from: $$BACKUP_PATH" && \
+	echo "" && \
+	echo "WARNING: This will DROP and recreate all tables!" && \
+	echo "All existing data will be LOST!" && \
+	echo "" && \
+	read -p "Type 'yes' to proceed: " confirm && \
+	if [ "$$confirm" != "yes" ]; then \
+		echo "Restore cancelled"; \
+		exit 0; \
+	fi && \
+	echo "" && \
+	echo "Downloading and restoring backup..." && \
+	kubectl exec deployment/spheraform-minio -- mc cat "$$BACKUP_PATH" | gunzip | kubectl exec -i deployment/spheraform-postgres -- psql -U spheraform -d spheraform && \
+	echo "" && \
+	echo "✓ Restore completed successfully"
 
 # Check backup health in Kubernetes
 backup-health-k8s:

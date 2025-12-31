@@ -42,8 +42,8 @@ postgres:
     enabled: true
     schedule: "0 2 * * *"  # Daily at 2 AM
     retention:
-      hourlyBackupHours: 0       # No hourly backups
-      dailyBackupDays: 7         # Keep daily for 7 days
+      hourlyBackupHours: 72      # Keep all backups from last 72 hours
+      dailyBackupDays: 30        # Keep daily backups for 30 days
       dailyBackupHour: 2         # Hour to keep as daily backup (0-23)
     storage:
       local:
