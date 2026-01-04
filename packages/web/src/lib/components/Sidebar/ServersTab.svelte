@@ -26,7 +26,6 @@
 	}
 
 	export let sidebarWidth: number = 400;
-	export let martinUrl: string;
 
 	let servers: Server[] = [];
 	let loading = true;

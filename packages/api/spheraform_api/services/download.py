@@ -324,7 +324,7 @@ class DownloadService:
         # Drop table if it exists
         self.db.execute(text(f"DROP TABLE IF EXISTS {cache_table}"))
 
-        # Create table with SRID 3857 (Web Mercator) for Martin tile server
+        # Create table with SRID 3857 (Web Mercator) for tile serving
         create_table_sql = f"""
         CREATE TABLE {cache_table} (
             id SERIAL PRIMARY KEY,
@@ -367,7 +367,7 @@ class DownloadService:
                 geometry_json = json.dumps(feature.get("geometry"))
                 properties_json = json.dumps(feature.get("properties", {}))
 
-                # Transform from 4326 (WGS84) to 3857 (Web Mercator) for Martin
+                # Transform from 4326 (WGS84) to 3857 (Web Mercator) for tile serving
                 insert_sql = f"""
                 INSERT INTO {cache_table} (geom, properties)
                 VALUES (

@@ -44,15 +44,6 @@ minio:
     storageClass: gp3
   # rootPassword: ${MINIO_PASSWORD}
 
-martin:
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "200m"
-    limits:
-      memory: "1Gi"
-      cpu: "1000m"
-
 api:
   image:
     repository: ghcr.io/yourusername/spheraform-api

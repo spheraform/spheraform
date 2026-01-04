@@ -109,11 +109,6 @@ class Settings(BaseSettings):
         default="/tmp/spheraform/temp", description="Temporary files directory"
     )
 
-    # External services
-    martin_url: str = Field(
-        default="http://localhost:3000", description="Martin tile server URL"
-    )
-
     # Application defaults
     default_probe_frequency_hours: int = Field(
         default=24, description="Default hours between change probes"

@@ -85,7 +85,7 @@ def merge_and_convert(feature_lists: list[list], export_job_id: str, format: str
 async def generate_pmtiles(dataset_id: str):
     """
     Generate PMTiles in background for large datasets.
-    Allows Martin to serve while generation happens.
+    Allows tiles to be served while generation happens.
 
     Args:
         dataset_id: UUID of the Dataset
@@ -98,6 +98,5 @@ async def generate_pmtiles(dataset_id: str):
     # 1. Generate PMTiles from PostGIS or GeoParquet
     # 2. Upload to S3
     # 3. Update dataset with s3_tiles_key
-    # 4. Notify Martin to reload config (if needed)
     logger.info(f"PMTiles generation not yet implemented for dataset {dataset_id}")
     pass

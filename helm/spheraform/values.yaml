@@ -138,45 +138,6 @@ minio:
     initialDelaySeconds: 10
     periodSeconds: 10
 
-# Martin tile server
-martin:
-  enabled: true
-  image:
-    repository: ghcr.io/maplibre/martin
-    tag: latest
-    pullPolicy: IfNotPresent
-  resources:
-    requests:
-      memory: "128Mi"
-      cpu: "100m"
-    limits:
-      memory: "512Mi"
-      cpu: "500m"
-  webuiEnabled: true
-  config:
-    poolSize: 20
-    autoBounds: skip  # Options: skip, quick, exact
-    defaultSrid: 3857
-    autoPublish:
-      enabled: true  # Toggle to enable/disable auto_publish section
-      tables:
-        fromSchemas: public
-        idColumns:
-          - id
-        sourceIdFormat: "{table}"
-        tables: "cache_%"  # Pattern to match tables
-        buffer: 256
-        extent: 4096
-        clipGeom: true
-        geometryColumn: geom
-        srid: 3857
-  pmtiles:
-    # Storage backend for PMTiles
-    # Supported protocols: s3://, gs://, az://, file://, https://
-    storageProtocol: "s3://"  # Override with PMTILES_STORAGE_PROTOCOL env var
-    storagePath: "spheraform/datasets/"  # Override with PMTILES_STORAGE_PATH env var
-    cacheSizeMb: 128
-
 # Spheraform API
 api:
   enabled: true

@@ -38,7 +38,7 @@
 	<SearchBar />
 	<TopRightBubbles />
 
-	<Sidebar open={sidebarOpen} martinUrl={data.config.martinUrl} on:close={closeSidebar} />
+	<Sidebar open={sidebarOpen} on:close={closeSidebar} />
 </div>
 
 <style>
