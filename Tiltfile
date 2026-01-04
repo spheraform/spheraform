@@ -48,7 +48,6 @@ k8s_yaml(
             'web.image.pullPolicy=Never',
             'api.image.tag=latest',
             'web.image.tag=latest',
-            'martin.image.pullPolicy=IfNotPresent',
         ]
     )
 )
@@ -66,13 +65,6 @@ k8s_resource(
     port_forwards='5173:3000',
     labels=['services'],
     resource_deps=['spheraform-api'],
-)
-
-k8s_resource(
-    'spheraform-martin',
-    port_forwards='3000:3000',
-    labels=['services'],
-    resource_deps=['spheraform-postgres'],
 )
 
 k8s_resource(
@@ -202,7 +194,6 @@ print("""
 Services:
   • Web UI:      http://localhost:5173
   • API:         http://localhost:8000/docs
-  • Martin:      http://localhost:3000
   • Flower:      http://localhost:5555 (Celery monitoring)
   • MinIO:       http://localhost:9001 (minioadmin/minioadmin)
   • PostgreSQL:  localhost:5432

@@ -37,6 +37,7 @@ class S3Client:
         settings = get_settings()
 
         self.endpoint_url = endpoint_url or settings.s3_endpoint
+        self.public_endpoint_url = settings.s3_public_endpoint or self.endpoint_url
         self.access_key = access_key or settings.s3_access_key
         self.secret_key = secret_key or settings.s3_secret_key
         self.region = region or settings.s3_region
@@ -159,8 +160,9 @@ class S3Client:
 
             async with response["Body"] as stream:
                 with open(local_path, "wb") as f:
-                    while chunk := await stream.read(8192):
-                        f.write(chunk)
+                    # Read entire stream (aioboto3 read() doesn't accept size argument)
+                    content = await stream.read()
+                    f.write(content)
 
             logger.info(f"Download complete: {local_path}")
 
@@ -333,13 +335,14 @@ class S3Client:
     ) -> str:
         """
         Get public URL for object (without presigning).
+        Uses public endpoint if configured, otherwise falls back to internal endpoint.
 
         Args:
             s3_key: S3 object key
             bucket: Bucket name (uses default if not provided)
 
         Returns:
-            Public URL string
+            Public URL string (browser-accessible)
         """
         bucket = bucket or self.bucket
-        return f"{self.endpoint_url}/{bucket}/{s3_key}"
+        return f"{self.public_endpoint_url}/{bucket}/{s3_key}"

@@ -38,6 +38,8 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      # Enable CORS for browser access to PMTiles
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
     ports:
       - "9000:9000"  # API
       - "9001:9001"  # Console
@@ -50,6 +52,7 @@ services:
       retries: 3
 
   # Create MinIO bucket on startup
+  # CORS is configured via MINIO_API_CORS_ALLOW_ORIGIN environment variable on the minio service
   minio-setup:
     image: minio/mc:latest
     container_name: spheraform-minio-setup
@@ -63,34 +66,6 @@ services:
       mc anonymous set download myminio/spheraform;
       exit 0;
       "
-
-  # Martin tile server (serves tiles from PostGIS and PMTiles in S3)
-  martin:
-    image: ghcr.io/maplibre/martin:latest
-    container_name: spheraform-martin
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://spheraform:spheraform_dev@postgres:5432/spheraform
-      # MinIO/S3 credentials for PMTiles access
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      AWS_ENDPOINT_URL: http://minio:9000
-      AWS_REGION: us-east-1
-      AWS_ALLOW_HTTP: "true"
-      # Force path-style S3 addressing for MinIO (required for non-AWS S3-compatible storage)
-      AWS_S3_FORCE_PATH_STYLE: "true"
-      # PMTiles storage backend configuration
-      PMTILES_STORAGE_PROTOCOL: ${PMTILES_STORAGE_PROTOCOL:-s3://}
-      PMTILES_STORAGE_PATH: ${PMTILES_STORAGE_PATH:-spheraform/datasets/}
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./config:/config
-    command: --webui enable-for-all --listen-addresses 0.0.0.0:3000 --config /config/martin-config.yaml
 
   # Spheraform API
   api:
@@ -107,9 +82,11 @@ services:
       DATABASE_URL: postgresql+psycopg://spheraform:spheraform_dev@postgres:5432/spheraform
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       S3_BUCKET: spheraform
+      USE_CELERY: "true"
       PROXYSCRAPE_ENABLED: "false"
     ports:
       - "8000:8000"
@@ -134,6 +111,7 @@ services:
       DATABASE_URL: postgresql+psycopg://spheraform:spheraform_dev@postgres:5432/spheraform
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       S3_BUCKET: spheraform

@@ -1,7 +1,9 @@
 """Background worker for processing crawl jobs."""
 
 import asyncio
+import json
 import logging
+import threading
 import time
 from datetime import datetime
 from typing import Optional
@@ -186,7 +188,6 @@ class CrawlWorker:
                         existing.themes = dataset_meta.themes
                         # Store raw metadata (includes maxRecordCount, etc)
                         if dataset_meta.source_metadata:
-                            import json
                             existing.source_metadata = json.dumps(dataset_meta.source_metadata) if isinstance(dataset_meta.source_metadata, dict) else dataset_meta.source_metadata
                         datasets_updated += 1
                     else:
@@ -194,7 +195,6 @@ class CrawlWorker:
                         # Store raw metadata (includes maxRecordCount, etc)
                         source_metadata_str = None
                         if dataset_meta.source_metadata:
-                            import json
                             source_metadata_str = json.dumps(dataset_meta.source_metadata) if isinstance(dataset_meta.source_metadata, dict) else dataset_meta.source_metadata
 
                         new_dataset = Dataset(
@@ -291,8 +291,6 @@ def start_crawl_worker_thread(database_url: str):
     Args:
         database_url: Database connection URL
     """
-    import threading
-
     worker = CrawlWorker(database_url)
     thread = threading.Thread(target=worker.start, daemon=True)
     thread.start()

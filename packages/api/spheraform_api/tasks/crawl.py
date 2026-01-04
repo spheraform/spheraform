@@ -1,10 +1,14 @@
 """Crawl task definitions for Celery distributed processing."""
 
+import asyncio
+import json
 import logging
 from datetime import datetime
 from uuid import UUID
 
 from celery import group
+from sqlalchemy import func
+
 from ..celery_app import celery_app
 from ..celery_utils import get_db_session
 from spheraform_core.models import CrawlJob, Geoserver, Dataset, JobStatus, HealthStatus
@@ -40,18 +44,24 @@ def process_crawl_job(self, crawl_job_id: str):
         job.current_stage = "discovering_services"
         db.commit()
 
-        logger.info(f"Starting crawl job {crawl_job_id} for server {server.name}")
+        # Extract server attributes before async operations (to avoid detached instance)
+        server_name = server.name
+        server_base_url = server.base_url
+        server_id = str(server.id)
+
+        logger.info(f"Starting crawl job {crawl_job_id} for server {server_name}")
 
         try:
             # Discover all services (lightweight - just URLs)
-            services_task = discover_services.delay(server.base_url, str(server.id))
-            services = services_task.get()  # Wait for discovery to complete
+            # Run discovery directly (not as a subtask) to avoid Celery deadlock
+            import asyncio
+            services = asyncio.run(_discover_services_async(server_base_url, server_id))
 
             job.total_services = len(services)
             job.current_stage = "processing_services"
             db.commit()
 
-            logger.info(f"Found {len(services)} services on {server.name}")
+            logger.info(f"Found {len(services)} services on {server_name}")
 
             # Process services in parallel (groups of 10)
             service_groups = [services[i:i+10] for i in range(0, len(services), 10)]
@@ -78,7 +88,6 @@ def process_crawl_job(self, crawl_job_id: str):
 @celery_app.task(name="crawl.discover_services")
 def discover_services(base_url: str, server_id: str) -> list[str]:
     """Run async discovery in sync Celery task."""
-    import asyncio
     return asyncio.run(_discover_services_async(base_url, server_id))
 
 
@@ -116,7 +125,9 @@ async def _discover_services_async(base_url: str, server_id: str) -> list[str]:
                     folder_url = f"{base_url}/{folder}"
                     folder_catalog = await adapter._request(folder_url)
                     for svc in folder_catalog.get("services", []):
-                        services.append(f"{folder_url}/{svc['name']}/{svc['type']}")
+                        # Service name already includes folder path (e.g., "Asset/NoiseBarriers")
+                        # So construct URL from base_url, not folder_url
+                        services.append(f"{base_url}/{svc['name']}/{svc['type']}")
 
                 logger.info(f"Discovered {len(services)} services at {base_url}")
                 return services
@@ -129,7 +140,6 @@ async def _discover_services_async(base_url: str, server_id: str) -> list[str]:
 @celery_app.task(name="crawl.process_service", bind=True, max_retries=3)
 def process_service(self, crawl_job_id: str, service_url: str):
     """Run async service processing in sync Celery task."""
-    import asyncio
     return asyncio.run(_process_service_async(self, crawl_job_id, service_url))
 
 
@@ -159,38 +169,40 @@ async def _process_service_async(self, crawl_job_id: str, service_url: str):
 
         server = db.query(Geoserver).filter(Geoserver.id == job.geoserver_id).first()
 
+        # Extract server attributes to avoid detached instance errors
+        server_id = server.id
+        server_connection_config = server.connection_config
+        server_country = server.country
+
         datasets_found = 0
 
         try:
             async with ArcGISAdapter(
                 base_url=service_url,
-                connection_config=server.connection_config,
-                country_hint=server.country,
+                connection_config=server_connection_config,
+                country_hint=server_country,
             ) as adapter:
                 # Discover layers in this service
                 async for dataset_meta in adapter.discover_datasets():
                     # Upsert dataset to database
-                    from sqlalchemy import func
 
                     # Check if dataset exists
                     existing = (
                         db.query(Dataset)
                         .filter(
-                            Dataset.geoserver_id == server.id,
+                            Dataset.geoserver_id == server_id,
                             Dataset.access_url == dataset_meta.access_url,
                         )
                         .first()
                     )
 
-                    # Convert bbox tuple to WKT POLYGON and transform to EPSG:4326
+                    # Convert bbox tuple to WKT POLYGON (already in EPSG:4326 from adapter)
                     bbox_geometry = None
-                    if dataset_meta.bbox and dataset_meta.source_srid:
+                    if dataset_meta.bbox:
                         minx, miny, maxx, maxy = dataset_meta.bbox
                         bbox_wkt = f"POLYGON(({minx} {miny},{maxx} {miny},{maxx} {maxy},{minx} {maxy},{minx} {miny}))"
-                        bbox_geometry = func.ST_Transform(
-                            func.ST_GeomFromText(bbox_wkt, dataset_meta.source_srid),
-                            4326,
-                        )
+                        # Bbox is already in WGS84 (transformed by adapter), so create geometry directly in EPSG:4326
+                        bbox_geometry = func.ST_GeomFromText(bbox_wkt, 4326)
 
                     if existing:
                         # Update existing dataset
@@ -208,17 +220,15 @@ async def _process_service_async(self, crawl_job_id: str, service_url: str):
                         existing.themes = dataset_meta.themes
 
                         if dataset_meta.source_metadata:
-                            import json
                             existing.source_metadata = json.dumps(dataset_meta.source_metadata) if isinstance(dataset_meta.source_metadata, dict) else dataset_meta.source_metadata
                     else:
                         # Create new dataset
                         source_metadata_str = None
                         if dataset_meta.source_metadata:
-                            import json
                             source_metadata_str = json.dumps(dataset_meta.source_metadata) if isinstance(dataset_meta.source_metadata, dict) else dataset_meta.source_metadata
 
                         new_dataset = Dataset(
-                            geoserver_id=server.id,
+                            geoserver_id=server_id,
                             external_id=dataset_meta.external_id,
                             name=dataset_meta.name,
                             description=dataset_meta.description,

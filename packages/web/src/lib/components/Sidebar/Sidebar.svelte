@@ -6,7 +6,6 @@
 	import AnalyticsTab from './AnalyticsTab.svelte';
 
 	export let open = false;
-	export let martinUrl: string;
 
 	const dispatch = createEventDispatcher();
 
@@ -104,7 +103,7 @@
 
 		<div class="tab-content">
 			{#if activeTab === 'catalogue'}
-				<ServersTab {sidebarWidth} {martinUrl} />
+				<ServersTab {sidebarWidth} />
 			{:else if activeTab === 'active'}
 				<ActiveTab />
 			{:else if activeTab === 'analytics'}

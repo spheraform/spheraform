@@ -4,8 +4,10 @@ import logging
 from uuid import UUID
 
 from celery import group, chord
+
 from ..celery_app import celery_app
 from ..celery_utils import get_db_session
+from ..services.download import DownloadService
 from spheraform_core.models import Dataset
 
 logger = logging.getLogger("gunicorn.error")
@@ -44,7 +46,6 @@ async def fetch_dataset_for_export(dataset_id: str, bbox: tuple = None):
     Returns:
         GeoJSON features list
     """
-    from ..services.download import DownloadService
 
     with get_db_session() as db:
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
@@ -84,7 +85,7 @@ def merge_and_convert(feature_lists: list[list], export_job_id: str, format: str
 async def generate_pmtiles(dataset_id: str):
     """
     Generate PMTiles in background for large datasets.
-    Allows Martin to serve while generation happens.
+    Allows tiles to be served while generation happens.
 
     Args:
         dataset_id: UUID of the Dataset
@@ -97,6 +98,5 @@ async def generate_pmtiles(dataset_id: str):
     # 1. Generate PMTiles from PostGIS or GeoParquet
     # 2. Upload to S3
     # 3. Update dataset with s3_tiles_key
-    # 4. Notify Martin to reload config (if needed)
     logger.info(f"PMTiles generation not yet implemented for dataset {dataset_id}")
     pass

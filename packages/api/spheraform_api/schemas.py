@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional, List, Any
 from uuid import UUID
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from geoalchemy2.shape import to_shape
 
 from spheraform_core.models import ProviderType, HealthStatus, DownloadStrategy
@@ -98,6 +98,16 @@ class DatasetResponse(BaseModel):
     last_edit_date: Optional[datetime] = None
     last_fetched_at: Optional[datetime] = None
 
+    # Storage metadata
+    storage_format: Optional[str] = None
+    use_s3_storage: bool = False
+    s3_data_key: Optional[str] = None
+    s3_tiles_key: Optional[str] = None
+    pmtiles_generated: bool = False
+    pmtiles_generated_at: Optional[datetime] = None
+    pmtiles_size_bytes: Optional[int] = None
+    pmtiles_url: Optional[str] = None
+
     @field_validator('bbox', mode='before')
     @classmethod
     def convert_bbox_to_wkt(cls, value: Any) -> Optional[str]:
@@ -111,6 +121,15 @@ class DatasetResponse(BaseModel):
         except Exception:
             # If conversion fails, return None
             return None
+
+    @model_validator(mode='after')
+    def add_pmtiles_url(self) -> 'DatasetResponse':
+        """Add PMTiles URL if tiles are available."""
+        if self.s3_tiles_key:
+            from spheraform_core.storage.s3_client import S3Client
+            s3_client = S3Client()
+            self.pmtiles_url = s3_client.get_public_url(self.s3_tiles_key)
+        return self
 
     class Config:
         from_attributes = True

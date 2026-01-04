@@ -7,11 +7,11 @@ A platform that aggregates geospatial datasets from multiple geoservers into one
 - **Multi-Source Support**: ArcGIS REST (WFS, WCS, CKAN, GeoServer, S3 coming soon)
 - **Smart Change Detection**: Probe sources cheaply before downloading
 - **Intelligent Downloads**: Automatic strategy selection (paged, parallel, chunked) based on dataset size
-- **Multiple Export Formats**: GeoJSON (GeoPackage, Shapefile, MBTiles, PostGIS coming soon)
+- **Multiple Export Formats**: GeoJSON, GeoParquet, PMTiles (GeoPackage, Shapefile, MBTiles coming soon)
 - **Spatial Search**: Find datasets by bounding box with PostGIS spatial indexing
-- **Vector Tiles**: Fast map rendering with Martin tile server
+- **Vector Tiles**: Fast map rendering with PMTiles served from object storage
 - **Map-First Web Interface**: Full-screen map with floating glassmorphism UI
-- **Docker Deployment**: One-command deployment with Docker Compose
+- **Flexible Deployment**: Docker Compose or Kubernetes
 
 ## Project Structure
 
@@ -24,14 +24,13 @@ spheraform/
 │   ├── cli/           # Command-line interface (Typer) [planned]
 │   ├── client/        # Python SDK [planned]
 │   └── pipelines/     # Dagster orchestration [planned]
-├── devspace/          # Kubernetes/DevSpace configurations
-├── config/            # Application configuration (Martin, etc.)
-├── scripts/           # Utility scripts for development
+├── helm/              # Kubernetes Helm charts
+├── scripts/           # Utility scripts (backups, maintenance)
 ├── alembic/           # Database migrations
 ├── tests/             # Test suite
 ├── docs/              # Documentation
 ├── docker-compose.yml # Docker Compose deployment
-└── devspace.yaml      # DevSpace/Kubernetes deployment
+└── Tiltfile           # Tilt configuration for local Kubernetes development
 ```
 
 ## Quick Start
@@ -54,15 +53,48 @@ This starts:
 - **PostgreSQL + PostGIS**: localhost:5432
 - **Redis**: localhost:6379
 - **MinIO S3 Storage**: http://localhost:9001
-- **Martin Tile Server**: http://localhost:3000
+- **Celery Workers**: Background job processing
 
-### Development Setup
+### Local Kubernetes Development (Recommended)
 
-If you prefer running services individually:
+For local development with Kubernetes using Tilt:
+
+```bash
+# Start Minikube (if not already running)
+minikube start --cpus=4 --memory=8192
+
+# Start Tilt (builds images, deploys to k8s, enables hot-reload)
+tilt up
+
+# View Tilt UI
+open http://localhost:10350
+```
+
+**Tilt provides:**
+- Automatic Docker image building with live updates
+- Hot-reload for Python and Svelte code changes
+- Real-time logs from all services
+- Easy service restarts and debugging
+- Production-like Kubernetes environment locally
+
+**Access services** (via Tilt port-forwards):
+- **Web UI**: http://localhost:5173
+- **API Docs**: http://localhost:8000/docs
+- **MinIO Console**: http://localhost:9001 (minioadmin/minioadmin)
+- **Flower (Celery)**: http://localhost:5555
+
+**To stop:**
+```bash
+tilt down
+```
+
+### Docker Compose Development
+
+If you prefer running services individually without Kubernetes:
 
 ```bash
 # Start infrastructure only
-docker-compose up -d postgres redis minio martin
+docker-compose up -d postgres redis minio
 
 # Run migrations
 cd packages/api
@@ -83,32 +115,70 @@ Visit:
 - **Web UI**: http://localhost:5173
 - **API Docs**: http://localhost:8000/docs
 
-### Kubernetes/Minikube Deployment
+### Production Kubernetes Deployment
 
-For Kubernetes deployment using DevSpace (ideal for production-like local development):
+For production deployment to Kubernetes, you can use Skaffold, Helm, or kubectl:
+
+#### Option 1: Skaffold (Recommended for CI/CD)
 
 ```bash
-# Start Minikube (if not already running)
-minikube start --cpus=4 --memory=8192
+# Deploy to production
+PROFILE=production skaffold run
 
-# Deploy all services to Kubernetes
-devspace deploy
+# Deploy to staging
+PROFILE=staging skaffold run
 
-# Or start development mode with hot-reload
-devspace dev
-
-# Clean up
-devspace purge
+# Continuous deployment with hot-reload (staging)
+PROFILE=staging skaffold dev
 ```
 
-**See [docs/devspace.md](./docs/devspace.md) for detailed DevSpace configuration documentation.**
+#### Option 2: Helm
 
-This deployment provides:
-- Production-like Kubernetes environment locally
-- Hot-reload file sync in development mode
-- Automatic service discovery and networking
-- Persistent volumes for data storage (4Gi total)
-- All services automatically configured and connected
+```bash
+# Deploy using Helm
+helm install spheraform ./helm/spheraform \
+  -f ./helm/spheraform/values-production.yaml \
+  --set minio.publicEndpoint=https://your-minio-domain.com \
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host=your-domain.com \
+  --namespace production --create-namespace
+
+# Upgrade existing deployment
+helm upgrade spheraform ./helm/spheraform \
+  -f ./helm/spheraform/values-production.yaml \
+  --namespace production
+```
+
+#### Option 3: kubectl
+
+```bash
+# Generate manifests from Helm chart
+helm template spheraform ./helm/spheraform \
+  -f ./helm/spheraform/values-production.yaml > k8s-manifests.yaml
+
+# Apply to cluster
+kubectl apply -f k8s-manifests.yaml
+```
+
+**Check deployment status:**
+```bash
+kubectl get pods -n production
+kubectl get services -n production
+kubectl logs -f deployment/spheraform-api -n production
+```
+
+**Production checklist:**
+- [ ] Update MinIO credentials in `values-production.yaml`
+- [ ] Configure container registry (e.g., GHCR, Docker Hub)
+- [ ] Set image tags to specific versions (not `latest`)
+- [ ] Configure ingress with your domain
+- [ ] Set up SSL/TLS certificates
+- [ ] Configure persistent volumes for production storage class
+- [ ] Review resource limits and requests
+- [ ] Set up monitoring and logging
+- [ ] Configure backups for PostgreSQL
+
+See `helm/spheraform/values.yaml` for all configuration options.
 
 ## Development
 
@@ -145,12 +215,12 @@ ruff format .
 
 - **Backend**: FastAPI (async Python with httpx)
 - **Database**: PostgreSQL + PostGIS (spatial indexing with GIST)
-- **Queue**: Redis (job queue - planned)
-- **Storage**: MinIO (S3-compatible object storage)
-- **Tiles**: Martin (PostGIS → MVT vector tiles)
-- **Orchestration**: Dagster (planned)
-- **Frontend**: SvelteKit + MapLibre GL JS
-- **Deployment**: Docker Compose (multi-stage builds)
+- **Queue**: Redis + Celery (async job processing)
+- **Storage**: MinIO (S3-compatible object storage for GeoParquet/PMTiles)
+- **Tiles**: PMTiles (vector tiles served directly from object storage)
+- **Orchestration**: Celery Beat (scheduled tasks)
+- **Frontend**: SvelteKit + MapLibre GL JS + PMTiles protocol
+- **Deployment**: Docker Compose (local) or Kubernetes (Helm/Skaffold)
 
 ## Documentation
 
@@ -196,4 +266,4 @@ ruff format .
 
 ## License
 
-MIT
+Apache 2.0

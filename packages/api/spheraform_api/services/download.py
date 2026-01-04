@@ -15,11 +15,16 @@ from sqlalchemy import text
 from spheraform_core.models import Dataset, Geoserver, DownloadStrategy, DownloadJob, JobStatus
 from spheraform_core.adapters import ArcGISAdapter
 from spheraform_core.storage.backend import PostGISStorageBackend, S3StorageBackend
+from spheraform_core.storage.pmtiles_gen import generate_from_geojson
 
 logger = logging.getLogger("gunicorn.error")
 
 # Environment variable to control storage backend
-STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "hybrid")  # Options: postgis, object_storage, hybrid
+# Options:
+#   - "postgis": Always use PostGIS (no object storage)
+#   - "object_storage": Always use object storage with PMTiles (no PostGIS)
+#   - "hybrid": Auto-select based on dataset size (default)
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "hybrid")
 USE_OBJECT_STORAGE_FOR_LARGE_DATASETS = os.getenv("USE_OBJECT_STORAGE_FOR_LARGE_DATASETS", "true").lower() == "true"
 MIN_FEATURES_FOR_OBJECT_STORAGE = int(os.getenv("MIN_FEATURES_FOR_OBJECT_STORAGE", "10000"))
 
@@ -49,7 +54,8 @@ class DownloadService:
             logger.info(f"STORAGE_BACKEND=postgis, using PostGIS for {dataset.name}")
             return False
 
-        # Hybrid mode - decide based on dataset characteristics
+        # Hybrid mode (auto-select) - decide based on dataset characteristics
+        # Storage is exclusive: either object storage OR PostGIS, not both
         if not USE_OBJECT_STORAGE_FOR_LARGE_DATASETS:
             return False
 
@@ -81,7 +87,7 @@ class DownloadService:
         progress_callback: Optional[callable] = None,
     ) -> dict:
         """
-        Download dataset and cache it in PostGIS.
+        Download dataset and cache it in either object storage or PostGIS.
 
         Args:
             dataset_id: Dataset UUID
@@ -170,29 +176,18 @@ class DownloadService:
                     if not result.feature_count or result.feature_count == 0:
                         raise Exception(f"Download returned 0 features - dataset may be unavailable or query unsupported by server")
 
-                    # Determine storage backend - hybrid approach for large datasets
+                    # Determine storage backend
                     use_object_storage = self._should_use_object_storage(dataset, feature_count=result.feature_count)
 
-                    # ALWAYS store in PostGIS for tile serving (Martin compatibility)
-                    logger.info(f"Storing in PostGIS for tile serving: {dataset.name}")
-                    postgis_backend = PostGISStorageBackend(self.db)
-                    postgis_result = await postgis_backend.store_dataset(
-                        dataset_id=dataset_id,
-                        geojson_path=temp_path,
-                        job_id=job_id,
-                    )
-
-                    # Update dataset with PostGIS metadata
+                    # Update dataset cache status
                     dataset.is_cached = True
                     dataset.cached_at = datetime.utcnow()
-                    dataset.cache_table = postgis_result["cache_table"]
-                    dataset.storage_format = "hybrid" if use_object_storage else "postgis"
-                    if postgis_result["feature_count"]:
-                        dataset.feature_count = postgis_result["feature_count"]
 
-                    # ALSO store in object storage for large datasets (data exports & future PMTiles)
                     if use_object_storage:
-                        logger.info(f"ALSO storing in object storage for data access: {dataset.name}")
+                        # Store ONLY in object storage (no PostGIS)
+                        logger.info(f"Storing in object storage: {dataset.name}")
+                        dataset.storage_format = "geoparquet"  # Object storage uses GeoParquet format
+
                         s3_backend = S3StorageBackend(self.db)
                         s3_result = await s3_backend.store_dataset(
                             dataset_id=dataset_id,
@@ -200,29 +195,94 @@ class DownloadService:
                             job_id=job_id,
                         )
 
-                        # Add object storage metadata
+                        # Update object storage metadata
                         dataset.use_s3_storage = True
                         dataset.s3_data_key = s3_result["s3_data_key"]
-                        dataset.s3_tiles_key = s3_result["s3_tiles_key"]
                         dataset.parquet_schema = s3_result.get("parquet_schema")
+                        dataset.feature_count = result.feature_count
 
-                        # Total size is PostGIS + object storage
-                        dataset.cache_size_bytes = postgis_result["size_bytes"] + s3_result["size_bytes"]
+                        # Generate PMTiles for ALL datasets in object storage
+                        logger.info(f"Generating PMTiles for {dataset.name}")
+
+                        with tempfile.TemporaryDirectory() as pmtiles_temp_dir:
+                            pmtiles_path = Path(pmtiles_temp_dir) / "tiles.pmtiles"
+
+                            # Adaptive zoom levels based on feature count
+                            # For small datasets, use higher zoom to ensure visibility
+                            if result.feature_count < 1000:
+                                max_zoom = 16
+                            elif result.feature_count < 10000:
+                                max_zoom = 15
+                            elif result.feature_count < 100000:
+                                max_zoom = 14
+                            else:
+                                max_zoom = 12
+
+                            pmtiles_metadata = generate_from_geojson(
+                                geojson_path=temp_path,
+                                pmtiles_path=pmtiles_path,
+                                min_zoom=0,
+                                max_zoom=max_zoom,
+                                layer_name=str(dataset_id),
+                                simplification=10,
+                                buffer=64,
+                            )
+
+                            # Upload to S3
+                            tiles_key = f"datasets/{dataset_id}/tiles.pmtiles"
+                            await s3_backend.s3_client.upload_file(
+                                pmtiles_path,
+                                tiles_key,
+                                metadata={
+                                    "min_zoom": str(pmtiles_metadata["min_zoom"]),
+                                    "max_zoom": str(pmtiles_metadata["max_zoom"]),
+                                    "layer_name": pmtiles_metadata["layer_name"],
+                                },
+                            )
+
+                            # Get PMTiles file size
+                            pmtiles_size = pmtiles_path.stat().st_size
+
+                            # Update dataset with PMTiles metadata
+                            dataset.s3_tiles_key = tiles_key
+                            dataset.pmtiles_generated = True
+                            dataset.pmtiles_generated_at = datetime.utcnow()
+                            dataset.pmtiles_size_bytes = pmtiles_size
+
+                            logger.info(f"PMTiles generated: {tiles_key} ({pmtiles_size} bytes)")
+
+                        # Total size is object storage + PMTiles
+                        dataset.cache_size_bytes = s3_result["size_bytes"] + dataset.pmtiles_size_bytes
 
                         response = {
                             "success": True,
                             "dataset_id": str(dataset_id),
-                            "storage_backend": "hybrid",
-                            "cache_table": postgis_result["cache_table"],
+                            "storage_backend": "geoparquet",  # Object storage backend
                             "s3_data_key": s3_result["s3_data_key"],
-                            "s3_tiles_key": s3_result["s3_tiles_key"],
-                            "feature_count": postgis_result["feature_count"],
+                            "s3_tiles_key": dataset.s3_tiles_key,
+                            "pmtiles_generated": dataset.pmtiles_generated,
+                            "pmtiles_size_bytes": dataset.pmtiles_size_bytes,
+                            "feature_count": result.feature_count,
                             "size_bytes": dataset.cache_size_bytes,
                         }
                     else:
-                        # Small dataset - PostGIS only
+                        # Store in PostGIS only
+                        logger.info(f"Storing in PostGIS: {dataset.name}")
+                        dataset.storage_format = "postgis"
                         dataset.use_s3_storage = False
+
+                        postgis_backend = PostGISStorageBackend(self.db)
+                        postgis_result = await postgis_backend.store_dataset(
+                            dataset_id=dataset_id,
+                            geojson_path=temp_path,
+                            job_id=job_id,
+                        )
+
+                        # Update PostGIS metadata
+                        dataset.cache_table = postgis_result["cache_table"]
                         dataset.cache_size_bytes = postgis_result["size_bytes"]
+                        if postgis_result["feature_count"]:
+                            dataset.feature_count = postgis_result["feature_count"]
 
                         response = {
                             "success": True,
@@ -264,7 +324,7 @@ class DownloadService:
         # Drop table if it exists
         self.db.execute(text(f"DROP TABLE IF EXISTS {cache_table}"))
 
-        # Create table with SRID 3857 (Web Mercator) for Martin tile server
+        # Create table with SRID 3857 (Web Mercator) for tile serving
         create_table_sql = f"""
         CREATE TABLE {cache_table} (
             id SERIAL PRIMARY KEY,
@@ -307,7 +367,7 @@ class DownloadService:
                 geometry_json = json.dumps(feature.get("geometry"))
                 properties_json = json.dumps(feature.get("properties", {}))
 
-                # Transform from 4326 (WGS84) to 3857 (Web Mercator) for Martin
+                # Transform from 4326 (WGS84) to 3857 (Web Mercator) for tile serving
                 insert_sql = f"""
                 INSERT INTO {cache_table} (geom, properties)
                 VALUES (

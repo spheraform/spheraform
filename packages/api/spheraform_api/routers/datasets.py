@@ -10,6 +10,7 @@ from ..dependencies import get_db
 from ..schemas import DatasetResponse
 from spheraform_core.models import Dataset, Geoserver, ProviderType
 from spheraform_core.adapters import ArcGISAdapter
+from spheraform_core.storage.s3_client import S3Client
 
 router = APIRouter()
 
@@ -165,6 +166,62 @@ async def preview_dataset(dataset_id: UUID, limit: int = 100, db: Session = Depe
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Preview failed: {str(e)}",
         )
+
+
+@router.get("/{dataset_id}/tiles")
+async def get_tiles_url(
+    dataset_id: UUID,
+    presigned: bool = Query(False, description="Generate presigned URL for private buckets"),
+    expiration: int = Query(3600, description="Presigned URL expiration in seconds (default: 1 hour)", ge=60, le=86400),
+    db: Session = Depends(get_db),
+):
+    """
+    Get PMTiles URL for a dataset.
+
+    Returns the URL to the PMTiles file in object storage (MinIO/R2) for direct browser access.
+    The frontend can use this URL with pmtiles.js to load vector tiles.
+
+    Args:
+        dataset_id: Dataset UUID
+        presigned: Generate presigned URL (for private buckets)
+        expiration: Presigned URL expiration in seconds (60s - 24h)
+
+    Returns:
+        PMTiles URL (public or presigned) with metadata
+    """
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset {dataset_id} not found"
+        )
+
+    if not dataset.s3_tiles_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset {dataset_id} has no PMTiles available. PMTiles are generated during download for datasets in object storage."
+        )
+
+    s3_client = S3Client()
+
+    if presigned:
+        url = await s3_client.get_presigned_url(
+            dataset.s3_tiles_key,
+            expiration=expiration
+        )
+    else:
+        # Public URL
+        url = s3_client.get_public_url(dataset.s3_tiles_key)
+
+    return {
+        "dataset_id": str(dataset_id),
+        "dataset_name": dataset.name,
+        "tiles_url": url,
+        "s3_key": dataset.s3_tiles_key,
+        "presigned": presigned,
+        "pmtiles_generated_at": dataset.pmtiles_generated_at.isoformat() if dataset.pmtiles_generated_at else None,
+        "pmtiles_size_bytes": dataset.pmtiles_size_bytes,
+    }
 
 
 @router.post("/{dataset_id}/refresh", status_code=status.HTTP_202_ACCEPTED)

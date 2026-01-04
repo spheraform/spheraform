@@ -26,16 +26,12 @@ To access the services, use port-forwarding:
   # API (port 8000)
   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "spheraform.fullname" . }}-api 8000:8000
 
-  # Martin tile server (port 3000)
-  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "spheraform.fullname" . }}-martin 3000:3000
-
   # MinIO console (port 9001)
   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "spheraform.fullname" . }}-minio 9001:9001
 
 Then access:
   - Web UI:       http://localhost:5173
   - API docs:     http://localhost:8000/docs
-  - Martin:       http://localhost:3000
   - MinIO:        http://localhost:9001
 {{- end }}
 

@@ -9,4 +9,6 @@ metadata:
 data:
   MINIO_ROOT_USER: {{ .Values.minio.rootUser | quote }}
   MINIO_ROOT_PASSWORD: {{ .Values.minio.rootPassword | quote }}
+  # Enable CORS for browser access to PMTiles
+  MINIO_API_CORS_ALLOW_ORIGIN: "*"
 {{- end }}
